@@ -1,0 +1,1020 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Terminal Launcher</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a phone running the launcher sits beside a short cheat sheet.
+   At phone width the terminal is the whole page and the cheat sheet goes away. */
+:root {
+  /* the desk around the phone */
+  --desk: #e7e9ed;
+  --ink: #1b1f25;
+  --ink-soft: #586170;
+  --rule: #c7ccd4;
+  --key: #f7f8fa;
+  --focus: #1c55ad;
+  --device: #16181c;
+  --device-edge: #30343b;
+  --shadow: rgb(20 24 32 / 0.38);
+
+  /* the phone screen: its look belongs to the launcher, not to the page theme */
+  --t-bg: #000000;
+  --t-fg: #d6d8d2;
+  --t-dim: #7b8086;
+  --t-line: #2b2e33;
+  --t-accent: #f0b45e;
+  --t-app: #8fbaf0;
+  --t-ok: #a3d18b;
+  --t-err: #f58675;
+  --app-fg: #f1f3f5;
+  --app-soft: #aab1bb;
+  --off: #000000;
+
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", "Roboto Mono", Consolas, Menlo, monospace;
+  --font-text: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --desk: #0e1013; --ink: #e5e7eb; --ink-soft: #9aa2ad; --rule: #2b3037; --key: #191c21;
+    --focus: #8fbaf0; --device: #1c1f24; --device-edge: #3b4049; --shadow: rgb(0 0 0 / 0.65);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --desk: #0e1013; --ink: #e5e7eb; --ink-soft: #9aa2ad; --rule: #2b3037; --key: #191c21;
+  --focus: #8fbaf0; --device: #1c1f24; --device-edge: #3b4049; --shadow: rgb(0 0 0 / 0.65);
+  color-scheme: dark;
+}
+/* launcher themes, switched with the `theme` command */
+:root[data-term="green"] {
+  --t-bg: #010a04; --t-fg: #86e8a0; --t-dim: #4a9460; --t-line: #17472a;
+  --t-accent: #d2ffdc; --t-app: #b4f5c4; --t-ok: #d2ffdc; --t-err: #ffb3a3;
+}
+:root[data-term="amber"] {
+  --t-bg: #0b0700; --t-fg: #ffb84d; --t-dim: #a3722f; --t-line: #4d3614;
+  --t-accent: #ffe3b0; --t-app: #ffd591; --t-ok: #ffe3b0; --t-err: #ff9478;
+}
+:root[data-term="eink"] {
+  --t-bg: #eceeec; --t-fg: #151716; --t-dim: #666b68; --t-line: #c4c8c5;
+  --t-accent: #0d6a5c; --t-app: #1c55ad; --t-ok: #2b7634; --t-err: #b0271f;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { height: 100%; }
+body {
+  height: 100%; margin: 0;
+  background: var(--desk); color: var(--ink);
+  font: 15px/1.55 var(--font-text);
+}
+button { font: inherit; color: inherit; }
+
+.stage {
+  height: var(--vvh, 100%);
+  display: flex; align-items: center; justify-content: center;
+  gap: clamp(28px, 6vw, 88px);
+  padding-block: 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* ---------- the phone ---------- */
+.phone {
+  position: relative; flex: none;
+  height: min(100%, 800px); aspect-ratio: 9 / 18.5;
+  padding: 10px;
+  background: var(--device); border: 1px solid var(--device-edge); border-radius: 46px;
+  box-shadow: 0 30px 60px -30px var(--shadow);
+}
+.power {
+  position: absolute; left: 100%; top: 24%;
+  width: 5px; height: 70px; padding: 0;
+  border: 0; border-radius: 0 3px 3px 0;
+  background: var(--device-edge); cursor: pointer;
+}
+.power::after { content: ""; position: absolute; inset: -6px -16px -6px -4px; }
+.screen {
+  position: relative; height: 100%; overflow: hidden;
+  border-radius: 36px;
+  background: var(--t-bg); color: var(--t-fg);
+  container-type: inline-size;
+  font-family: var(--font-mono);
+}
+.tty {
+  position: relative;
+  height: 100%; display: flex; flex-direction: column;
+  font-size: clamp(11px, 3.6cqw, 15px); line-height: 1.45;
+  font-variant-ligatures: none; font-variant-numeric: tabular-nums;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.status {
+  display: flex; justify-content: space-between; gap: 1em;
+  padding-block: 1.15em 0.5em;
+  color: var(--t-dim); font-size: 0.86em; white-space: nowrap;
+}
+#st-right { display: flex; gap: 1ch; }
+.status .on { color: var(--t-accent); }
+
+.term {
+  flex: 1; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+  padding-block: 0.3em 0.6em; cursor: text;
+}
+.term::-webkit-scrollbar { display: none; }
+.ln, .prompt { min-height: 1.45em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dim { color: var(--t-dim); }
+.err { color: var(--t-err); }
+.ok { color: var(--t-ok); }
+.acc, .ps { color: var(--t-accent); }
+
+#cmd-form {
+  position: absolute; left: 0; right: 0; bottom: 3.2em; height: 1.45em;
+  margin: 0; pointer-events: none;
+}
+#cmd {
+  display: block; width: 100%; height: 100%; margin: 0; padding: 0;
+  border: 0; background: transparent; opacity: 0;
+  font-size: 16px; caret-color: transparent; cursor: text;
+}
+.cur { outline: 1px solid var(--t-fg); outline-offset: -1px; }
+.screen.focused .cur {
+  outline: 0; background: var(--t-fg); color: var(--t-bg);
+  animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink { 50% { background: transparent; color: inherit; } }
+
+.applink { all: unset; color: var(--t-app); cursor: pointer; }
+.applink:hover { text-decoration: underline; }
+.applink:focus-visible { outline: 1px solid var(--t-app); outline-offset: 2px; }
+.cols { columns: 11ch; column-gap: 2ch; }
+.cols .applink { display: block; padding-block: 0.3em; }
+
+/* the lock screen clock: 17 x 5 cells */
+.clock {
+  --px: min(3.5cqw, 14px);
+  display: grid; grid-template-columns: repeat(17, var(--px)); grid-auto-rows: var(--px);
+  gap: calc(var(--px) * 0.18);
+  margin-block: 1.6em 1.1em;
+}
+.clock i.on { background: var(--t-fg); }
+
+.suggest {
+  display: flex; gap: 0.5em; min-height: 3.2em;
+  padding-block: 0.4em 1em;
+  overflow-x: auto; scrollbar-width: none;
+}
+.suggest::-webkit-scrollbar { display: none; }
+.chip {
+  flex: none; padding: 0.25em 0.7em;
+  border: 1px solid var(--t-line); border-radius: 0.35em;
+  background: transparent; color: var(--t-fg);
+  white-space: nowrap; cursor: pointer;
+}
+.chip.is-app { color: var(--t-app); }
+.chip:hover { border-color: var(--t-dim); }
+.chip:focus-visible { outline: 1px solid var(--t-fg); outline-offset: 1px; }
+
+/* stand-in for a launched app */
+.app {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9em;
+  background: hsl(var(--h, 210) 30% 13%); color: var(--app-fg);
+  font-family: var(--font-text); font-size: clamp(12px, 4cqw, 16px);
+  animation: rise 0.18s ease-out;
+}
+@keyframes rise { from { transform: translateY(5%); opacity: 0; } }
+.app-tile {
+  width: 2.2em; height: 2.2em; display: grid; place-items: center;
+  border-radius: 0.55em; background: hsl(var(--h, 210) 45% 46%);
+  font: 600 2em/1 var(--font-text);
+}
+.app-name { font: 500 1.25em/1.2 var(--font-mono); }
+.app-note { padding-inline: 2em; color: var(--app-soft); font-size: 0.9em; text-align: center; text-wrap: balance; }
+.home {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: grid; justify-items: center; gap: 0.7em;
+  padding: 1.2em 0 0.9em; border: 0; background: transparent;
+  color: var(--app-soft); font: 0.8em/1 var(--font-mono); cursor: pointer;
+}
+.home i { width: 34%; height: 5px; border-radius: 3px; background: var(--app-fg); opacity: 0.85; }
+.home:focus-visible { outline: 0; }
+.home:focus-visible i { outline: 2px solid var(--app-fg); outline-offset: 3px; }
+
+.dimmer {
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  background: var(--off); opacity: var(--dim, 0); transition: opacity 0.2s;
+}
+.off {
+  position: absolute; inset: 0; z-index: 6;
+  width: 100%; border: 0; background: var(--off); cursor: pointer;
+}
+
+/* ---------- the cheat sheet ---------- */
+.notes {
+  flex: 0 1 27rem; min-width: 0; max-height: 100%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1.3rem;
+  padding: 4px; margin: -4px;   /* room for focus rings inside the scroll box */
+}
+.notes h1 {
+  margin: 0; font: 500 1.75rem/1.15 var(--font-mono);
+  letter-spacing: -0.02em; text-wrap: balance;
+}
+.notes h2 {
+  margin: 0 0 0.65rem; font: 600 0.7rem/1 var(--font-mono);
+  letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-soft);
+}
+.notes p { margin: 0; color: var(--ink-soft); }
+.notes .lede { margin-top: 0.7rem; font-size: 1.02rem; color: var(--ink); }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.rows li { display: grid; grid-template-columns: 8.2rem 1fr; gap: 0.8rem; align-items: baseline; color: var(--ink-soft); }
+.try, kbd {
+  justify-self: start;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--rule); border-radius: 5px;
+  background: var(--key); color: var(--ink);
+  font: 500 0.84rem/1.2 var(--font-mono);
+}
+.try { cursor: pointer; text-align: left; }
+.try:hover:not(:disabled) { border-color: var(--ink-soft); }
+.try:disabled { opacity: 0.45; cursor: default; }
+.try:focus-visible, .power:focus-visible, .off:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+@media (max-width: 720px) {
+  html, body { overflow: hidden; }
+  body { background: var(--t-bg); }
+  .stage { gap: 0; padding-block: 0; padding-left: 0; padding-right: 0; }
+  .notes, .power { display: none; }
+  .phone {
+    width: 100%; height: 100%; aspect-ratio: auto;
+    padding: 0; border: 0; border-radius: 0; box-shadow: none; background: var(--t-bg);
+  }
+  .screen { border-radius: 0; }
+  .status { padding-top: 0.8em; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app, .screen.focused .cur { animation: none; }
+  .dimmer { transition: none; }
+}
+</style>
+
+<main class="stage">
+  <div class="phone">
+    <button class="power" id="power" type="button" aria-label="Power button: turn the screen off or on" title="Power: screen off / on"></button>
+    <div class="screen" id="screen">
+      <div class="tty">
+        <div class="status" aria-hidden="true"><span id="st-left"></span><span id="st-right"></span></div>
+        <div class="term" id="term">
+          <div id="out" role="log" aria-live="polite"></div>
+          <div class="prompt" id="prompt" hidden><span id="ps"></span><span id="typed"></span><span class="cur" id="cur">&nbsp;</span><span id="after"></span></div>
+        </div>
+        <div class="suggest" id="suggest"></div>
+        <!-- The real text field. It is invisible and never hidden, so it keeps focus (and the phone keyboard) between commands. -->
+        <form id="cmd-form" autocomplete="off"><input id="cmd" type="text" aria-label="Terminal input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" data-1p-ignore data-lpignore="true"></form>
+      </div>
+      <div class="app" id="app" hidden>
+        <div class="app-tile" id="app-tile"></div>
+        <div class="app-name" id="app-name"></div>
+        <div class="app-note" id="app-note"></div>
+        <button class="home" id="home" type="button" aria-label="Go home to the terminal"><span>home</span><i></i></button>
+      </div>
+      <div class="dimmer" aria-hidden="true"></div>
+      <button class="off" id="off" type="button" aria-label="Wake the screen" hidden></button>
+    </div>
+  </div>
+
+  <aside class="notes">
+    <div>
+      <h1>Terminal Launcher</h1>
+      <p class="lede">One terminal is both the lock screen and the home screen. Log in, then run the phone by typing.</p>
+    </div>
+    <section>
+      <h2>Log in</h2>
+      <ul class="rows">
+        <li><button class="try" id="try-pw" type="button">root</button><span id="pw-note">The demo password. Click to type it.</span></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Then try</h2>
+      <ul class="rows">
+        <li><button class="try" type="button" data-cmd="ls">ls</button><span>List apps. Tap a name to open it.</span></li>
+        <li><button class="try" type="button" data-cmd="open spotify">open spotify</button><span>Launch an app, or just type its name.</span></li>
+        <li><button class="try" type="button" data-cmd="notifs">notifs</button><span>Read notifications.</span></li>
+        <li><button class="try" type="button" data-cmd="torch">torch</button><span>Toggle the flashlight.</span></li>
+        <li><button class="try" type="button" data-cmd="bright 40">bright 40</button><span>Dim the screen.</span></li>
+        <li><button class="try" type="button" data-cmd="theme eink">theme eink</button><span>Switch the color theme.</span></li>
+        <li><button class="try" type="button" data-cmd="help">help</button><span>Every command.</span></li>
+        <li><button class="try" type="button" data-cmd="lock">lock</button><span>Back to the lock screen.</span></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Keys</h2>
+      <ul class="rows">
+        <li><kbd>Tab</kbd><span>Complete a command or app name.</span></li>
+        <li><kbd>&uarr; &darr;</kbd><span>Command history.</span></li>
+        <li><kbd>Esc</kbd><span>Leave an app, back to the terminal.</span></li>
+        <li><kbd>Side button</kbd><span>Screen off. Wakes to the lock screen.</span></li>
+      </ul>
+    </section>
+  </aside>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const root = document.documentElement;
+  const screenEl = $('screen'), term = $('term'), out = $('out'), promptEl = $('prompt');
+  const psEl = $('ps'), typedEl = $('typed'), curEl = $('cur'), afterEl = $('after');
+  const input = $('cmd'), suggest = $('suggest'), appEl = $('app'), offEl = $('off');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const store = {
+    get(key, fallback) {
+      try { const v = localStorage.getItem('tl.' + key); return v == null ? fallback : JSON.parse(v); }
+      catch { return fallback; }
+    },
+    set(key, value) { try { localStorage.setItem('tl.' + key, JSON.stringify(value)); } catch {} },
+  };
+
+  /* ---------- the pretend phone ---------- */
+  const DEFAULT_PW = 'root';
+  const THEMES = ['default', 'green', 'amber', 'eink'];
+  const APPS = [
+    ['browser', 'web', '212M'], ['calculator', 'tools', '4M'], ['calendar', 'tools', '38M'],
+    ['camera', 'media', '61M'], ['clock', 'tools', '12M'], ['contacts', 'comms', '18M'],
+    ['files', 'tools', '22M'], ['firefox', 'web', '240M'], ['mail', 'comms', '96M'],
+    ['maps', 'travel', '180M'], ['messages', 'comms', '54M'], ['music', 'media', '77M'],
+    ['notes', 'tools', '9M'], ['phone', 'comms', '31M'], ['photos', 'media', '143M'],
+    ['settings', 'system', '-'], ['signal', 'comms', '121M'], ['spotify', 'media', '164M'],
+    ['weather', 'tools', '27M'], ['whatsapp', 'comms', '188M'], ['youtube', 'media', '256M'],
+  ].map(([name, cat, size]) => ({ name, cat, size }));
+  const APP_NAMES = APPS.map((a) => a.name);
+  const CATS = [...new Set(APPS.map((a) => a.cat))].sort();
+  const CONTACTS = { mom: '555 0142', alex: '555 0117', sam: '555 0199', work: '555 0100' };
+  let notifs = [
+    { app: 'messages', age: '2m', text: 'Mom: are you coming on Sunday?' },
+    { app: 'mail', age: '18m', text: 'Your order has shipped' },
+    { app: 'calendar', age: '1h', text: 'Dentist tomorrow at 09:30' },
+  ];
+
+  const savedTheme = store.get('theme', 'default');
+  const savedAliases = store.get('aliases', null);
+  const state = {
+    locked: true, off: false,
+    wifi: true, bt: false, torch: false,
+    vol: 60, bright: 100, battery: 82,
+    password: DEFAULT_PW, fails: 0,
+    recents: ['messages', 'camera', 'spotify', 'maps'],
+    theme: THEMES.includes(savedTheme) ? savedTheme : 'default',
+    aliases: savedAliases && typeof savedAliases === 'object' ? savedAliases : { ll: 'ls -l' },
+  };
+
+  /* ---------- time ---------- */
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = (n) => String(n).padStart(2, '0');
+  const hhmm = (d = new Date()) => pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const dayLine = (d = new Date()) => `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+
+  const GLYPH = {
+    0: '111101101101111', 1: '010110010010111', 2: '111001111100111', 3: '111001111001111',
+    4: '101101111001001', 5: '111100111001111', 6: '111100111101111', 7: '111001001001001',
+    8: '111101111101111', 9: '111101111001111', ':': '01010',
+  };
+  function clockCells(text) {
+    const rows = [[], [], [], [], []];
+    [...text].forEach((ch, i) => {
+      const g = GLYPH[ch], w = g.length / 5;
+      for (let r = 0; r < 5; r++) {
+        if (i) rows[r].push(false);
+        for (let c = 0; c < w; c++) rows[r].push(g[r * w + c] === '1');
+      }
+    });
+    return rows.flat();
+  }
+  function renderClock(node) {
+    const t = hhmm();
+    if (node.dataset.t === t) return;
+    node.dataset.t = t;
+    node.setAttribute('aria-label', t);
+    const cells = clockCells(t);
+    if (!node.childElementCount) for (let i = 0; i < cells.length; i++) node.append(document.createElement('i'));
+    cells.forEach((on, i) => node.children[i].classList.toggle('on', on));
+  }
+
+  /* ---------- output ---------- */
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function scrollEnd() { term.scrollTop = term.scrollHeight; }
+  function add(node) {
+    out.append(node);
+    while (out.childElementCount > 400) out.firstElementChild.remove();
+    scrollEnd();
+    return node;
+  }
+  function print(text = '', cls = '') { return add(el('div', ('ln ' + cls).trim(), text)); }
+  function clear() { out.replaceChildren(); }
+
+  function appLink(name) {
+    const b = el('button', 'applink', name);
+    b.type = 'button';
+    b.addEventListener('click', () => runTapped('open ' + name));
+    return b;
+  }
+  function printApps(list, long) {
+    if (!long) {
+      const box = el('div', 'cols');
+      list.forEach((a) => box.append(appLink(a.name)));
+      return add(box);
+    }
+    print(`total ${list.length}`, 'dim');
+    for (const a of list) {
+      const l = el('div', 'ln');
+      l.append(appLink(a.name), ' '.repeat(12 - a.name.length) + a.cat.padEnd(8) + a.size.padStart(5));
+      add(l);
+    }
+  }
+
+  /* ---------- the input line ---------- */
+  const LOCK = Symbol('lock'), CANCEL = Symbol('cancel');
+  let reader = null;      // the pending readLine, if the terminal is waiting for input
+  let appOpen = null;     // the pending launch, while an app covers the terminal
+  let typing = false;     // a cheat-sheet button is typing into the terminal
+  const hist = [];
+  let histIdx = -1, draft = '';
+
+  function focusInput() { input.focus({ preventScroll: true }); }
+  function renderInput() {
+    if (!reader) return;
+    const v = input.value;
+    const shown = reader.mask ? '*'.repeat(v.length) : v;
+    const pos = Math.min(input.selectionStart ?? v.length, v.length);
+    typedEl.textContent = shown.slice(0, pos);
+    curEl.textContent = shown.slice(pos, pos + 1) || ' ';
+    afterEl.textContent = shown.slice(pos + 1);
+    if (!reduceMotion) { curEl.style.animation = 'none'; void curEl.offsetWidth; curEl.style.animation = ''; }
+  }
+  function setInput(v) {
+    input.value = v;
+    try { input.setSelectionRange(v.length, v.length); } catch {}
+    renderInput();
+    updateSuggest();
+    scrollEnd();
+  }
+  function readLine(ps, { mask = false, kind = 'ask' } = {}) {
+    const type = mask ? 'password' : 'text';
+    if (input.type !== type) input.type = type;
+    psEl.textContent = ps;
+    psEl.className = kind === 'shell' ? 'ps' : '';
+    promptEl.hidden = false;
+    return new Promise((resolve, reject) => {
+      reader = { resolve, reject, mask, kind, ps };
+      setInput('');
+    });
+  }
+  function echo(r, text) {
+    const l = el('div', 'ln');
+    l.append(el('span', r.kind === 'shell' ? 'ps' : '', r.ps), text);
+    add(l);
+  }
+  function endRead() {
+    const r = reader;
+    reader = null;
+    input.value = '';
+    promptEl.hidden = true;
+    suggest.replaceChildren();
+    return r;
+  }
+  function submit() {
+    if (!reader) return;
+    const value = input.value;
+    const r = endRead();
+    echo(r, r.mask ? '' : value);
+    r.resolve(value);
+  }
+  function cancelLine() {
+    if (!reader) return;
+    if (reader.kind === 'login') return setInput('');
+    echo(reader, (reader.mask ? '' : input.value) + '^C');
+    if (reader.kind === 'ask') endRead().reject(CANCEL);
+    else { histIdx = -1; setInput(''); }
+  }
+  function histMove(dir) {            // dir 1 = older, -1 = newer
+    if (!hist.length) return;
+    if (histIdx === -1) {
+      if (dir < 0) return;
+      draft = input.value;
+      histIdx = hist.length;
+    }
+    histIdx = Math.max(0, Math.min(hist.length, histIdx - dir));
+    const atDraft = histIdx === hist.length;
+    setInput(atDraft ? draft : hist[histIdx]);
+    if (atDraft) histIdx = -1;
+  }
+
+  /* ---------- completion: Tab on a keyboard, the chip row on a phone ---------- */
+  function getCandidates(v) {
+    if (!reader || reader.kind !== 'shell') return null;
+    const start = v.search(/\S*$/);
+    const p = v.slice(start).toLowerCase();
+    const before = v.slice(0, start).trim().split(/\s+/).filter(Boolean);
+    const starts = (list) => list.filter((s) => s.startsWith(p));
+    const as = (list, kind) => list.map((text) => ({ text, kind }));
+    let items = [];
+    if (!before.length) {
+      if (!p) items = as(state.recents, 'app');
+      else {
+        const cmds = [...COMMANDS.values()].filter((c) => c.group).map((c) => c.name);
+        items = [...as(starts([...cmds, ...Object.keys(state.aliases)]), 'cmd'), ...as(starts(APP_NAMES), 'app')];
+      }
+    } else if (before.length === 1) {
+      const c = before[0].toLowerCase();
+      if (c === 'open') {
+        const pre = starts(APP_NAMES);
+        items = as(!p ? state.recents : pre.length ? pre : APP_NAMES.filter((s) => s.includes(p)), 'app');
+      } else if (c === 'ls') items = as(starts(['-l', ...CATS]), 'arg');
+      else if (c === 'call' || c === 'sms') items = as(starts(Object.keys(CONTACTS)), 'arg');
+      else if (c === 'theme') items = as(starts(THEMES), 'arg');
+      else if (c === 'torch' || c === 'wifi' || c === 'bt') items = as(starts(['on', 'off']), 'arg');
+      else if (c === 'notifs') items = as(starts(['clear']), 'arg');
+      else if (c === 'unalias') items = as(starts(Object.keys(state.aliases)), 'arg');
+    }
+    return { start, p, items };
+  }
+  function updateSuggest() {
+    suggest.replaceChildren();
+    const c = getCandidates(input.value);
+    if (!c) return;
+    for (const it of c.items.slice(0, 8)) {
+      const b = el('button', 'chip is-' + it.kind, it.text);
+      b.type = 'button';
+      b.addEventListener('click', () => pick(c, it));
+      suggest.append(b);
+    }
+  }
+  function pick(c, it) {
+    if (!reader || reader.kind !== 'shell' || typing) return;
+    const v = input.value.slice(0, c.start) + it.text;
+    if (it.kind === 'app') { setInput(v); submit(); }   // an app chip launches, like tapping it in `ls`
+    else setInput(v + ' ');
+    focusInput();
+  }
+  function complete() {
+    const c = getCandidates(input.value);
+    if (!c || !c.p || !c.items.length) return;
+    const head = input.value.slice(0, c.start);
+    if (c.items.length === 1) return setInput(head + c.items[0].text + ' ');
+    const texts = c.items.map((i) => i.text).filter((t) => t.startsWith(c.p));
+    if (!texts.length) return;
+    let common = texts[0];
+    for (const t of texts) while (!t.startsWith(common)) common = common.slice(0, -1);
+    if (common.length > c.p.length) setInput(head + common);
+  }
+
+  /* ---------- status line and cheat sheet ---------- */
+  function syncStatus() {
+    $('st-left').textContent = 'tty1 · ' + (state.locked ? 'locked' : 'home');
+    const r = $('st-right');
+    r.replaceChildren();
+    if (state.torch) r.append(el('span', 'on', 'torch'));
+    if (state.wifi) r.append(el('span', '', 'wifi'));
+    if (state.bt) r.append(el('span', '', 'bt'));
+    r.append(el('span', '', state.battery + '%'), el('span', '', hhmm()));
+  }
+  function syncChrome() {
+    syncStatus();
+    const busy = state.locked || !!appOpen;
+    document.querySelectorAll('.try[data-cmd]').forEach((b) => { b.disabled = busy; });
+    const changed = state.password !== DEFAULT_PW;
+    $('try-pw').disabled = !state.locked || changed;
+    $('pw-note').textContent = changed
+      ? 'You changed the password. Reload the page to reset it.'
+      : 'The demo password. Click to type it.';
+  }
+  function setTheme(t) {
+    state.theme = t;
+    if (t === 'default') delete root.dataset.term; else root.dataset.term = t;
+    store.set('theme', t);
+  }
+  function applyBright() {
+    screenEl.style.setProperty('--dim', ((100 - state.bright) / 100 * 0.78).toFixed(3));
+  }
+
+  /* ---------- apps ---------- */
+  function resolveApp(q) {
+    q = q.toLowerCase();
+    const exact = APPS.filter((a) => a.name === q);
+    if (exact.length) return exact;
+    const pre = APPS.filter((a) => a.name.startsWith(q));
+    return pre.length ? pre : APPS.filter((a) => a.name.includes(q));
+  }
+  function hue(name) {
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    return h;
+  }
+  function launch(app, note, logLine) {
+    print(logLine || `opening ${app.name}`, 'dim');
+    state.recents = [app.name, ...state.recents.filter((n) => n !== app.name)].slice(0, 4);
+    $('app-tile').textContent = app.name[0].toUpperCase();
+    $('app-name').textContent = app.name;
+    $('app-note').textContent = note || 'A stand-in for the real app. The launcher steps aside until you come home.';
+    appEl.style.setProperty('--h', hue(app.name));
+    return new Promise((resolve, reject) => {
+      appOpen = { resolve, reject };
+      appEl.hidden = false;
+      syncChrome();
+      $('home').focus({ preventScroll: true });
+    });
+  }
+  function goHome() {
+    if (!appOpen) return;
+    const a = appOpen;
+    appOpen = null;
+    appEl.hidden = true;
+    syncChrome();
+    a.resolve();
+    focusInput();
+  }
+
+  /* ---------- commands ---------- */
+  const COMMANDS = new Map();
+  const def = (name, group, usage, desc, run) => COMMANDS.set(name, { name, group, usage, desc, run });
+  const tokenize = (line) => (line.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((t) => t.replace(/^(["'])(.*)\1$/, '$2'));
+  const afterFirst = (line) => line.trim().replace(/^\S+\s*/, '');
+  const ask = (ps, mask) => readLine(ps, { mask, kind: 'ask' });
+
+  const toggle = (key, label) => (args) => {
+    const a = (args[0] || '').toLowerCase();
+    if (a && a !== 'on' && a !== 'off') return print(`${key}: expected on or off`, 'err');
+    state[key] = a ? a === 'on' : !state[key];
+    syncStatus();
+    print(`${label} ${state[key] ? 'on' : 'off'}`);
+  };
+  const level = (key, label, apply) => (args) => {
+    if (args.length) {
+      if (!/^\d{1,3}$/.test(args[0]) || Number(args[0]) > 100) return print(`${key}: expected a number from 0 to 100`, 'err');
+      state[key] = Number(args[0]);
+      if (apply) apply();
+    }
+    const filled = Math.round(state[key] / 10);
+    print(`${label} ${String(state[key]).padStart(3)}  [${'#'.repeat(filled)}${'-'.repeat(10 - filled)}]`);
+  };
+
+  def('ls', 'apps', 'ls [-l] [text]', 'list apps', (args) => {
+    const long = args.includes('-l');
+    const q = (args.find((a) => !a.startsWith('-')) || '').toLowerCase();
+    const list = q ? APPS.filter((a) => a.name.includes(q) || a.cat === q) : APPS;
+    if (!list.length) return print(`ls: no apps match '${q}'`, 'err');
+    printApps(list, long);
+  });
+  def('open', 'apps', 'open <app>', 'launch an app', (args) => {
+    if (!args.length) return print('usage: open <app>', 'err');
+    const found = resolveApp(args[0]);
+    if (!found.length) return print(`open: no app matches '${args[0]}'`, 'err');
+    if (found.length > 1) { print(`open: '${args[0]}' matches ${found.length} apps`, 'dim'); return printApps(found); }
+    return launch(found[0]);
+  });
+
+  def('notifs', 'phone', 'notifs [clear]', 'notifications', (args) => {
+    if (args[0] === 'clear') {
+      const n = notifs.length;
+      notifs = [];
+      return print(n ? `cleared ${n}` : 'nothing to clear', 'dim');
+    }
+    if (args.length) return print('usage: notifs [clear]', 'err');
+    if (!notifs.length) return print('no notifications', 'dim');
+    for (const n of notifs) {
+      const l = el('div', 'ln');
+      l.append(appLink(n.app), el('span', 'dim', `  ${n.age} ago`));
+      add(l);
+      print('  ' + n.text);
+    }
+  });
+  def('call', 'phone', 'call <name>', 'start a call', (args, rest) => {
+    if (!args.length) {
+      print('contacts', 'dim');
+      for (const [name, num] of Object.entries(CONTACTS)) print(name.padEnd(8) + num);
+      return;
+    }
+    const who = args[0].toLowerCase();
+    const num = CONTACTS[who] || (/^\+?[\d\s-]{3,}$/.test(rest) ? rest : '');
+    if (!num) return print(`call: no contact named '${args[0]}'`, 'err');
+    const label = CONTACTS[who] ? `${who} (${num})` : num;
+    return launch(APPS.find((a) => a.name === 'phone'), `Calling ${label}`, `calling ${label}`);
+  });
+  def('sms', 'phone', 'sms <name> <msg>', 'send a text', (args, rest) => {
+    const who = (args[0] || '').toLowerCase();
+    const msg = afterFirst(rest);
+    if (!who || !msg) return print('usage: sms <name> <message>', 'err');
+    if (!CONTACTS[who]) return print(`sms: no contact named '${args[0]}'`, 'err');
+    print(`to ${who} (${CONTACTS[who]}): ${msg}`, 'dim');
+    print('sent', 'ok');
+  });
+  def('torch', 'phone', 'torch [on|off]', 'flashlight', toggle('torch', 'torch'));
+  def('wifi', 'phone', 'wifi [on|off]', 'wi-fi', toggle('wifi', 'wifi'));
+  def('bt', 'phone', 'bt [on|off]', 'bluetooth', toggle('bt', 'bluetooth'));
+  def('vol', 'phone', 'vol [0-100]', 'media volume', level('vol', 'volume'));
+  def('bright', 'phone', 'bright [0-100]', 'brightness', level('bright', 'brightness', applyBright));
+  def('battery', 'phone', 'battery', 'charge level', () => print(`${state.battery}%  discharging, about 9h left`));
+
+  def('date', 'system', 'date', 'date and time', () => {
+    const d = new Date();
+    print(`${dayLine(d)} ${d.getFullYear()} ${hhmm(d)}:${pad(d.getSeconds())}`);
+  });
+  def('theme', 'system', 'theme [name]', 'color theme', (args) => {
+    if (!args.length) return print(THEMES.map((t) => (t === state.theme ? `[${t}]` : t)).join('  '));
+    const t = args[0].toLowerCase();
+    if (!THEMES.includes(t)) return print(`theme: no theme '${args[0]}'. Try ${THEMES.join(', ')}`, 'err');
+    setTheme(t);
+    print(`theme ${t}`);
+  });
+  def('alias', 'system', 'alias [n=cmd]', 'shortcuts', (args, rest) => {
+    if (!rest) {
+      const names = Object.keys(state.aliases).sort();
+      if (!names.length) return print('no aliases. Add one: alias s=open spotify', 'dim');
+      names.forEach((n) => print(`${n}='${state.aliases[n]}'`));
+      return;
+    }
+    const m = rest.match(/^([A-Za-z][\w-]*)=(.*)$/);
+    const value = m ? m[2].trim().replace(/^(["'])(.*)\1$/, '$2').trim() : '';
+    if (!m || !value) return print('usage: alias name=command', 'err');
+    const name = m[1].toLowerCase();
+    if (COMMANDS.has(name)) return print(`alias: '${name}' is a built-in command`, 'err');
+    state.aliases[name] = value;
+    store.set('aliases', state.aliases);
+    print(`${name}='${value}'`);
+  });
+  def('unalias', null, 'unalias <name>', 'remove a shortcut', (args) => {
+    const name = (args[0] || '').toLowerCase();
+    if (!Object.hasOwn(state.aliases, name)) return print(`unalias: no alias '${args[0] || ''}'`, 'err');
+    delete state.aliases[name];
+    store.set('aliases', state.aliases);
+  });
+  def('history', 'system', 'history', 'past commands', () => {
+    const from = Math.max(0, hist.length - 20);
+    hist.slice(from).forEach((h, i) => print(String(from + i + 1).padStart(3) + '  ' + h));
+  });
+  def('passwd', 'system', 'passwd', 'change password', async () => {
+    if ((await ask('current password: ', true)) !== state.password) return print('passwd: wrong password', 'err');
+    const next = await ask('new password: ', true);
+    if (!next) return print('passwd: password unchanged', 'err');
+    if ((await ask('retype new password: ', true)) !== next) return print('passwd: passwords do not match', 'err');
+    state.password = next;
+    syncChrome();
+    print('password updated', 'ok');
+  });
+  def('clear', 'system', 'clear', 'clear the screen', clear);
+  def('lock', 'system', 'lock', 'lock the phone', () => LOCK);
+  def('help', 'system', 'help', 'this list', () => {
+    const row = (usage, desc) => {
+      const l = el('div', 'ln');
+      l.append(usage.padEnd(17), el('span', 'dim', desc));
+      add(l);
+    };
+    for (const g of ['apps', 'phone', 'system']) {
+      print(g, 'acc');
+      for (const c of COMMANDS.values()) if (c.group === g) row(c.usage, c.desc);
+      if (g === 'apps') row('<app>', 'same, name alone');
+    }
+    print('Tab completes. Up arrow recalls.', 'dim');
+  });
+  def('exit', null, '', '', () => LOCK);
+  def('logout', null, '', '', () => LOCK);
+  def('?', null, '', '', () => COMMANDS.get('help').run());
+
+  function distance(a, b) {
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = row[0];
+      row[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const keep = row[j];
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = keep;
+      }
+    }
+    return row[b.length];
+  }
+  function nearest(word) {
+    const names = [...[...COMMANDS.values()].filter((c) => c.group).map((c) => c.name), ...APP_NAMES];
+    if (word.length >= 2) {
+      const pre = names.find((n) => n.startsWith(word));
+      if (pre) return pre;
+    }
+    let best = '', bestD = word.length <= 3 ? 2 : 3;   // one slip in a short word, two in a longer one
+    for (const n of names) {
+      const d = distance(word, n);
+      if (d < bestD) { best = n; bestD = d; }
+    }
+    return best;
+  }
+  async function exec(line) {
+    let toks = tokenize(line);
+    const first = (toks[0] || '').toLowerCase();
+    if (Object.hasOwn(state.aliases, first)) {
+      line = (state.aliases[first] + ' ' + afterFirst(line)).trim();
+      toks = tokenize(line);
+    }
+    const name = (toks[0] || '').toLowerCase(), args = toks.slice(1);
+    const cmd = COMMANDS.get(name);
+    if (cmd) return cmd.run(args, afterFirst(line));
+    const app = APPS.find((a) => a.name === name);
+    if (app && !args.length) return launch(app);
+    print(`${toks[0]}: command not found`, 'err');
+    const guess = nearest(name);
+    if (guess) print(`did you mean '${guess}'?`, 'dim');
+  }
+
+  /* ---------- lock screen and shell ---------- */
+  function drawLock(note) {
+    clear();
+    print('phone login · tty1', 'dim');
+    const c = el('div', 'clock');
+    c.setAttribute('role', 'img');
+    renderClock(c);
+    add(c);
+    print(dayLine());
+    const n = notifs.length;
+    print(`${n ? `${n} notification${n === 1 ? '' : 's'}` : 'no notifications'} · battery ${state.battery}%`, 'dim');
+    print('');
+    if (state.password === DEFAULT_PW) print(`demo password: ${DEFAULT_PW}`, 'dim');
+    if (note) print(note, 'err');
+  }
+  async function lockScreen() {
+    state.locked = true;
+    syncChrome();
+    let note = '';
+    for (;;) {
+      drawLock(note);
+      const pw = await readLine('password: ', { mask: true, kind: 'login' });
+      const ok = pw === state.password;
+      await sleep(ok ? 120 : 550);
+      if (ok) { state.fails = 0; return; }
+      state.fails++;
+      note = 'Login incorrect';
+      if (state.fails % 3 === 0) {
+        drawLock(note);
+        const l = print('', 'err');
+        for (let s = 5; s > 0; s--) { l.textContent = `Too many attempts. Wait ${s}s`; await sleep(1000); }
+        note = '';
+      }
+    }
+  }
+  async function shell(lastLogin) {
+    state.locked = false;
+    syncChrome();
+    clear();
+    print(`Last login: ${dayLine(lastLogin)} ${hhmm(lastLogin)} on tty1`, 'dim');
+    const n = notifs.length;
+    print((n ? `${n} notification${n === 1 ? '' : 's'}. ` : '') + 'Type help for commands.', 'dim');
+    print('');
+    for (;;) {
+      try {
+        const line = (await readLine('$ ', { kind: 'shell' })).trim();
+        if (!line) continue;
+        if (hist[hist.length - 1] !== line) hist.push(line);
+        histIdx = -1;
+        if ((await exec(line)) === LOCK) return;
+      } catch (e) {
+        if (e === LOCK) return;
+        if (e !== CANCEL) print(String((e && e.message) || e), 'err');
+      }
+    }
+  }
+  function forceLock() {
+    if (appOpen) {
+      const a = appOpen;
+      appOpen = null;
+      appEl.hidden = true;
+      a.reject(LOCK);
+    } else if (reader) endRead().reject(LOCK);
+  }
+  function screenOff() {
+    state.off = true;
+    offEl.hidden = false;
+    input.blur();
+    if (state.locked) setInput(''); else forceLock();
+  }
+  function wake() {
+    state.off = false;
+    offEl.hidden = true;
+    focusInput();
+  }
+
+  /* ---------- events ---------- */
+  function runTapped(cmd) {
+    if (!reader || reader.kind !== 'shell' || typing) return;
+    setInput(cmd);
+    submit();
+  }
+  async function typeAndRun(text, kind) {
+    if (typing || state.off || !reader || reader.kind !== kind) return;
+    const r = reader;
+    typing = true;
+    focusInput();
+    setInput('');
+    if (reduceMotion) setInput(text);
+    else for (const ch of text) {
+      if (reader !== r) break;
+      setInput(input.value + ch);
+      await sleep(30);
+    }
+    typing = false;
+    if (reader === r) submit();
+  }
+
+  input.addEventListener('input', () => { histIdx = -1; renderInput(); updateSuggest(); scrollEnd(); });
+  input.addEventListener('keyup', renderInput);
+  input.addEventListener('focus', () => screenEl.classList.add('focused'));
+  input.addEventListener('blur', () => screenEl.classList.remove('focused'));
+  document.addEventListener('selectionchange', () => { if (document.activeElement === input) renderInput(); });
+  $('cmd-form').addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'Enter') { e.preventDefault(); submit(); return; }
+    if (!reader) return;
+    const sh = reader.kind === 'shell';
+    if (e.key === 'Tab') { e.preventDefault(); if (sh) complete(); }
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); if (sh) histMove(e.key === 'ArrowUp' ? 1 : -1); }
+    else if (e.ctrlKey && !e.altKey && !e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'l') { e.preventDefault(); if (!state.locked) clear(); }
+      else if (k === 'u') { e.preventDefault(); setInput(''); }
+      else if (k === 'c' && input.selectionStart === input.selectionEnd) { e.preventDefault(); cancelLine(); }
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (state.off) {
+      // Enter or Space on the power button already toggles through its click
+      const onButton = e.target instanceof Element && e.target.closest('.power, .off');
+      if (onButton && (e.key === 'Enter' || e.key === ' ')) return;
+      e.preventDefault();
+      wake();
+      return;
+    }
+    if (e.key === 'Escape' && appOpen) { goHome(); return; }
+    // typing anywhere on the page lands in the terminal
+    if (e.target !== input && !appOpen && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) focusInput();
+  });
+  screenEl.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.chip, .applink')) e.preventDefault();   // keep the keyboard up on a phone
+  });
+  screenEl.addEventListener('click', (e) => {
+    if (state.off || appOpen || e.target.closest('button')) return;
+    if (String(getSelection())) return;                            // let people select output to copy
+    focusInput();
+  });
+  $('home').addEventListener('click', goHome);
+  $('power').addEventListener('click', () => (state.off ? wake() : screenOff()));
+  offEl.addEventListener('click', wake);
+  $('try-pw').addEventListener('click', () => typeAndRun(state.password, 'login'));
+  document.querySelectorAll('.try[data-cmd]').forEach((b) => b.addEventListener('click', () => typeAndRun(b.dataset.cmd, 'shell')));
+
+  // keep the prompt above an on-screen keyboard that overlays the page instead of resizing it
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const fit = () => {
+      const covered = window.innerHeight - vv.height > 80;
+      root.style.setProperty('--vvh', covered ? vv.height + 'px' : '');
+      if (covered) window.scrollTo(0, 0);
+      scrollEnd();
+    };
+    vv.addEventListener('resize', fit);
+  }
+  window.addEventListener('resize', scrollEnd);
+
+  let shownMinute = hhmm();
+  setInterval(() => {
+    if (hhmm() === shownMinute) return;
+    shownMinute = hhmm();
+    syncStatus();
+    const c = out.querySelector('.clock');
+    if (c) renderClock(c);
+  }, 1000);
+
+  /* ---------- boot ---------- */
+  setTheme(state.theme);
+  applyBright();
+  (async () => {
+    let lastLogin = new Date();
+    for (;;) {
+      const p = lockScreen();
+      if (!state.off) focusInput();
+      await p;
+      const now = new Date();
+      await shell(lastLogin);
+      lastLogin = now;
+    }
+  })();
+})();
+</script>
