@@ -1,6 +1,8 @@
 package com.terminallauncher.shell
 
 import java.util.Calendar
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * The terminal session: the lock screen, the prompt, and every command.
@@ -10,12 +12,14 @@ import java.util.Calendar
  * redraw through [onChange]. All calls are expected on one thread.
  *
  * With a [remote], `ssh` hands the prompt to a shell on another computer until that session ends.
+ * With a [weather], `weather` prints a forecast.
  */
 class Shell(
     private val phone: Phone,
     private val store: Store,
     private val vault: Vault,
     private val remote: Remote? = null,
+    private val weather: Weather? = null,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
@@ -56,6 +60,15 @@ class Shell(
         const val KEY_CANCEL = "cancel"
         private const val INSTALL_MARK = "terminal-launcher-adds-a-key"
 
+        private const val KEY_PLACE = "weather_place"      // the city `weather` reports, one field a line
+        private const val KEY_UNITS = "weather_units"      // c or f; unset follows the phone's region
+
+        /** A forecast this fresh is shown again without asking for a new one. */
+        private const val FORECAST_FRESH_MS = 10 * 60_000L
+
+        /** Where the weather is read in Fahrenheit and miles an hour. */
+        private val IMPERIAL_COUNTRIES = setOf("US", "BS", "BZ", "KY", "PW", "FM", "MH", "LR")
+
         /** A remote prompt that asks for one of these is answered without showing what is typed. */
         private val SECRET = Regex("(password|passphrase|passcode)[^\\n]*:\\s*$", RegexOption.IGNORE_CASE)
         private val TIPS = listOf(
@@ -72,6 +85,7 @@ class Shell(
             "fetch prints the system card",
             "fx off turns the animations off",
             "ssh user@host logs in to a computer",
+            "weather prints the forecast",
         )
         private val SHELL_PROMPT = Prompt("$ ", PromptKind.SHELL)
         private val LOGIN_PROMPT = Prompt("password: ", PromptKind.LOGIN, mask = true)
@@ -155,6 +169,21 @@ class Shell(
     /** When the launcher password was last typed. */
     private var authAt = 0L
 
+    /**
+     * A command that is waiting for an answer from the network. While it waits the terminal takes no
+     * input but a cancel. Each wait has a ticket, and an answer that arrives for an old ticket, after
+     * a cancel or after the terminal locked, is dropped. See [wait].
+     */
+    private var waitingFor = 0
+    private var tickets = 0
+    private var waitingName = ""
+    private var waitingNote = -1L
+
+    private class FreshForecast(val place: Place, val imperial: Boolean, val at: Long, val forecast: Forecast)
+
+    /** The last forecast fetched, kept for [FORECAST_FRESH_MS]. */
+    private var lastForecast: FreshForecast? = null
+
     init {
         val saved = store.get(KEY_ALIASES)
         if (saved == null) aliases["ll"] = "ls -l"
@@ -201,6 +230,11 @@ class Shell(
 
     /** Ctrl+C. */
     fun cancel(input: String) {
+        if (waitingFor != 0) {
+            giveUp()
+            onChange()
+            return
+        }
         val s = session
         if (s != null && !s.open) {             // still logging in, or answering one of its questions
             prompt?.let { echo(it, "^C") }
@@ -222,8 +256,15 @@ class Shell(
         onChange()
     }
 
-    /** A tap on one of the key chips a remote session shows. */
+    /** A tap on one of the key chips a remote session shows, or on the cancel chip of a command that waits. */
     fun press(key: String) {
+        if (waitingFor != 0) {
+            if (key == KEY_CANCEL) {
+                giveUp()
+                onChange()
+            }
+            return
+        }
         val s = session ?: return
         when (key) {
             KEY_INTERRUPT -> if (s.open) s.interrupt("") else s.drop()
@@ -262,6 +303,7 @@ class Shell(
         locked = true
         waitingForPhone = false
         pending = null
+        stopWaiting()
         page(emptyList())
         prompt = if (lockoutUntil > now()) null else LOGIN_PROMPT
         onChange()
@@ -321,6 +363,7 @@ class Shell(
     /* ---------------- completion ---------------- */
 
     fun candidates(input: String): Candidates? {
+        if (waitingFor != 0) return Candidates(input.length, "", listOf(Candidate(KEY_CANCEL, ChipKind.KEY)))
         session?.let { s ->
             // Nothing to complete on another computer. The chips are the keys a phone keyboard lacks.
             val keys = when {
@@ -377,6 +420,11 @@ class Shell(
                 else -> none
             }
             word == "ssh-copy-id" -> if (firstArg) lastWord(hosts()) else none
+            word == "weather" -> when {
+                firstArg -> lastWord(listOf("set", "units"))
+                arg.startsWith("units ") -> lastWord(listOf("c", "f"))
+                else -> none
+            }
             word in commands || word in aliases -> none
             // not a command, so the whole line is an app name with spaces in it
             else -> Candidates(lead, body.lowercase(), apps(matchApps(body.lowercase())))
@@ -420,7 +468,54 @@ class Shell(
         lineIds = content.map { nextId++ }
     }
 
+    /** Takes one line back off the screen, if it is still there. */
+    private fun remove(id: Long) {
+        val at = lineIds.indexOf(id)
+        if (at < 0) return
+        lines = lines.filterIndexed { i, _ -> i != at }
+        lineIds = lineIds.filterIndexed { i, _ -> i != at }
+    }
+
     private fun print(text: String = "", style: Style = Style.NORMAL) = add(TextLine(listOf(Span(text, style))))
+
+    /* ---------------- waiting for the network ---------------- */
+
+    /**
+     * Hides the prompt while the command called [name] waits for an answer, with [note] on screen to
+     * say what for. Returns the ticket of this wait: the answer is taken with [answered], and only
+     * if the terminal is still waiting for that ticket.
+     */
+    private fun wait(name: String, note: String): Int {
+        add(TextLine(listOf(Span(note, Style.DIM)), Entrance.NONE))
+        waitingNote = nextId - 1
+        waitingName = name
+        prompt = null
+        waitingFor = ++tickets
+        return waitingFor
+    }
+
+    /** Ends the wait for [ticket] and brings the prompt back. false if that wait is already over. */
+    private fun answered(ticket: Int): Boolean {
+        if (ticket == 0 || waitingFor != ticket) return false
+        stopWaiting()
+        prompt = SHELL_PROMPT
+        return true
+    }
+
+    /** Ends any wait without touching the prompt. Whatever the wait was for is dropped when it arrives. */
+    private fun stopWaiting() {
+        if (waitingFor == 0) return
+        waitingFor = 0
+        remove(waitingNote)
+    }
+
+    /** The user would rather not wait. */
+    private fun giveUp() {
+        val name = waitingName
+        stopWaiting()
+        prompt = SHELL_PROMPT
+        print("$name: cancelled", Style.DIM)
+    }
 
     private fun row(vararg spans: Span) = add(TextLine(spans.toList()))
 
@@ -480,6 +575,7 @@ class Shell(
 
     private fun showLock(note: String? = null) {
         hangUp()
+        stopWaiting()
         toLockHeader()
         locked = true
         waitingForPhone = false
@@ -549,6 +645,7 @@ class Shell(
         locked = false
         waitingForPhone = false
         pending = null
+        stopWaiting()
         prompt = SHELL_PROMPT
         page(emptyList())
         val last = store.get(KEY_LAST_LOGIN)?.toLongOrNull()
@@ -1058,6 +1155,142 @@ class Shell(
 
     /* ---------------- commands ---------------- */
 
+    /* ---------------- weather ---------------- */
+
+    private fun imperial(): Boolean = when (store.get(KEY_UNITS)) {
+        "f" -> true
+        "c" -> false
+        else -> Locale.getDefault().country in IMPERIAL_COUNTRIES
+    }
+
+    private fun savedPlace(): Place? {
+        val fields = store.get(KEY_PLACE)?.split('\n') ?: return null
+        if (fields.size != 6) return null
+        val latitude = fields[4].toDoubleOrNull() ?: return null
+        val longitude = fields[5].toDoubleOrNull() ?: return null
+        return Place(fields[0], fields[1].ifEmpty { null }, fields[2].ifEmpty { null }, fields[3].ifEmpty { null }, latitude, longitude)
+    }
+
+    private fun savePlace(p: Place) {
+        fun field(text: String?) = text.orEmpty().replace('\n', ' ')
+        val fields = listOf(field(p.name), field(p.region), field(p.country), field(p.countryCode), p.latitude, p.longitude)
+        store.put(KEY_PLACE, fields.joinToString("\n"))
+    }
+
+    /**
+     * The first of [places] that all of [hint] fits: `springfield, illinois` picks the Springfield
+     * whose region, country or country letters have a word starting with each word typed after the
+     * comma. With nothing after the name it is the first, which is the likeliest.
+     */
+    private fun choose(places: List<Place>, hint: String): Place? {
+        fun words(text: String) = text.lowercase().split(' ', '-', ',').filter { it.isNotBlank() }
+        val wanted = words(hint)
+        if (wanted.isEmpty()) return places.firstOrNull()
+        return places.firstOrNull { p ->
+            val has = listOfNotNull(p.region, p.country, p.countryCode).flatMap(::words)
+            wanted.all { want -> has.any { it.startsWith(want) } }
+        }
+    }
+
+    /**
+     * Finds the city [typed] and prints its forecast. With [keep] it becomes the city that `weather`
+     * alone reports, and the other cities of that name are offered in case it is the wrong one.
+     */
+    private fun lookUp(w: Weather, typed: String, keep: Boolean) {
+        val name = typed.substringBefore(',').trim()
+        val hint = typed.substringAfter(',', "")
+        if (name.length < 2) {
+            print("weather: '${typed.trim()}' is too short to look up", Style.ERR)
+            return
+        }
+        val ticket = wait("weather", "asking ${w.source}")
+        w.find(name) { places, problem ->
+            if (waitingFor != ticket) return@find
+            val match = places?.let { choose(it, hint) }
+            if (match == null) {
+                answered(ticket)
+                print(if (places == null) "weather: ${problem ?: "no answer"}" else "weather: no city called '${typed.trim()}'", Style.ERR)
+            } else {
+                // Namesakes first: a search for oslo also turns up oslob.
+                val others = if (!keep) emptyList() else places.filter { it.label != match.label }.distinctBy { it.label }
+                    .sortedBy { !it.name.equals(match.name, ignoreCase = true) }.take(3)
+                report(w, match, ticket) {
+                    if (!keep) return@report
+                    // Only now: a command that failed, or was cancelled, has changed nothing.
+                    savePlace(match)
+                    print("This is now the city weather reports.", Style.DIM)
+                    for (other in others) row(Span("not it? ", Style.DIM), Span(other.label, Style.APP, "weather set ${other.label}"))
+                }
+            }
+            onChange()
+        }
+    }
+
+    /**
+     * Prints the forecast for [place], asking for a new one unless the last is fresh. [ticket] is the
+     * wait this is the end of, or 0 to start one. [after] runs once the forecast is on screen.
+     */
+    private fun report(w: Weather, place: Place, ticket: Int = 0, after: () -> Unit = {}) {
+        val imperial = imperial()
+        val fresh = lastForecast?.takeIf { it.place == place && it.imperial == imperial && now() - it.at in 0 until FORECAST_FRESH_MS }
+        if (fresh != null) {
+            answered(ticket)
+            showForecast(fresh, w.source)
+            after()
+            return
+        }
+        val waiting = if (ticket != 0) ticket else wait("weather", "asking ${w.source}")
+        w.forecast(place, imperial) { forecast, problem ->
+            if (!answered(waiting)) return@forecast
+            if (forecast == null) {
+                print("weather: ${problem ?: "no answer"}", Style.ERR)
+            } else {
+                val got = FreshForecast(place, imperial, now(), forecast)
+                lastForecast = got
+                showForecast(got, w.source)
+                after()
+            }
+            onChange()
+        }
+    }
+
+    private fun showForecast(got: FreshForecast, source: String) {
+        val f = got.forecast
+        // What arrives is checked where it is read, but a number that cannot be rounded must not end the app.
+        fun whole(v: Double): String = if (v.isNaN() || v.isInfinite()) "?" else v.roundToInt().toString()
+        fun degrees(v: Double) = whole(v) + "°"
+        print(got.place.label, Style.ACCENT)
+        row(Span(degrees(f.temperature) + if (got.imperial) "F" else "C"), Span("  " + describeWeather(f.code)))
+        print(
+            "feels ${degrees(f.feelsLike)} · wind ${whole(f.wind)} ${if (got.imperial) "mph" else "km/h"} · humidity ${f.humidity}%",
+            Style.DIM,
+        )
+        if (f.days.isNotEmpty()) print()
+        f.days.forEachIndexed { i, day ->
+            val wet = day.wet
+            row(
+                Span((if (i == 0) "today" else weekdayOf(day.date)).padEnd(6), Style.DIM),
+                Span(degrees(day.high).padStart(4)),
+                Span(degrees(day.low).padStart(5), Style.DIM),
+                Span("  " + describeWeather(day.code).padEnd(13)),
+                Span(if (wet == null) "" else "$wet%".padStart(4), if (wet != null && wet >= 50) Style.APP else Style.DIM),
+            )
+        }
+        print("$source · ${Fmt.hhmm(got.at)}", Style.DIM)
+    }
+
+    private fun weatherUnits(word: String?) {
+        val unit = word?.lowercase()
+        when (unit) {
+            null -> choices(listOf("c", "f"), if (imperial()) "f" else "c", "weather units")
+            "c", "f" -> {
+                store.put(KEY_UNITS, unit)
+                print(if (unit == "f") "weather in °F and mph" else "weather in °C and km/h")
+            }
+            else -> print("usage: weather units [c|f]", Style.ERR)
+        }
+    }
+
     private fun def(name: String, group: String?, usage: String, desc: String, run: (args: List<String>, rest: String) -> Unit) {
         commands[name] = Command(name, group, usage, desc, run)
     }
@@ -1256,6 +1489,28 @@ class Shell(
             else if (month == null) print("cal: no month '${args[0]}'", Style.ERR)
             else if (year == null) print("cal: no year '${args[1]}'", Style.ERR)
             else calendar(month, year, today)
+        }
+        def("weather", "system", "weather [city]", "forecast") { args, rest ->
+            val w = weather
+            val first = args.firstOrNull()?.lowercase()
+            when {
+                w == null -> print("weather: not available here", Style.ERR)
+                first == "units" -> if (args.size > 2) print("usage: weather units [c|f]", Style.ERR) else weatherUnits(args.getOrNull(1))
+                first == "set" -> {
+                    val city = afterFirst(rest)
+                    if (city.isBlank()) print("usage: weather set <city>", Style.ERR) else lookUp(w, city, keep = true)
+                }
+                first == null -> {
+                    val place = savedPlace()
+                    if (place != null) report(w, place)
+                    else {
+                        print("No city is set yet. Set one:", Style.DIM)
+                        row(Span("weather set ", Style.APP, fill = "weather set "), Span("<city>", Style.DIM))
+                    }
+                }
+                // Another city, just this once. The first city ever asked about is remembered.
+                else -> lookUp(w, rest, keep = savedPlace() == null)
+            }
         }
         def("fetch", "system", "fetch", "system card") { _, _ ->
             val sys = phone.system()

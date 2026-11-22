@@ -33,6 +33,8 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `np [pause\|play\|next\|prev]` | what is playing, with progress and controls |
 | `battery`, `date` | status |
 | `cal [month] [year]` | a month calendar with today marked |
+| `weather [city]` | the weather now and for five days, for your city or for another one just this once |
+| `weather set <city>`, `weather units [c\|f]` | choose the city `weather` reports, and Celsius or Fahrenheit |
 | `fetch` | a system card: Android version, device, uptime, apps, battery, storage |
 | `theme [name]` | `default`, `green`, `amber`, `eink`, `nord`, `gruvbox`, `dracula`, `solarized`, `synthwave` or `paper` |
 | `saver [name]` | the lock screen's screensaver: `rain`, `stars`, `life`, `clock`, `shuffle` or `off`; `saver show` previews it |
@@ -101,12 +103,29 @@ stop one. `ssh-copy-id` leaves them alone too, so the key has to be added there 
 
 **What protects it.** The private key stays on the phone, encrypted with a key that Android's
 keystore holds and will not give out. If a launcher password is set, `ssh` asks for it again unless
-it was typed in the last five minutes. A session ends when the screen turns off. `ssh` is the only
-part of the launcher that uses the network.
+it was typed in the last five minutes. A session ends when the screen turns off. `ssh` and
+`weather` are the only parts of the launcher that use the network.
 
 A computer set up to offer only an Ed25519 host key needs a phone whose Android can check one.
 Android 14 cannot, and `ssh` then says the two have no method in common. Computers set up the
 usual way offer other kinds as well.
+
+## Weather
+
+`weather` prints the weather now and for the next five days in your city. `weather set <city>`
+chooses that city, and the first city you ever ask about is remembered as well. `weather tokyo`
+shows another city once and leaves yours alone.
+
+- **Towns that share a name:** `weather set springfield, illinois` picks one by its region or
+  country. After a `set` the others are listed, and tapping one switches to it.
+- **Units:** `weather units c` or `weather units f`. Until one is chosen they follow the phone's
+  region.
+- **An app called weather:** `open weather` still opens it.
+
+Forecasts come from [Open-Meteo](https://open-meteo.com), which needs no account. Two things are
+sent, and only when you run `weather`: the city's name, to find it, and the city's position, to
+get its forecast. The phone's own location is never read. A forecast is reused for ten minutes
+before a new one is asked for.
 
 ## The lock
 
@@ -143,7 +162,8 @@ talks to the phone through the `Phone` interface, which `AndroidPhone.kt` implem
 Jetpack Compose: `ui/TerminalScreen.kt` is the screen, `ui/Rows.kt` draws each kind of output line,
 `ui/Effects.kt` holds the timing of the animations and `ui/Savers.kt` the screensavers.
 SSH follows the same split: `shell/Remote.kt` is what the shell asks for and how a remote shell's
-output becomes lines, and `AndroidSsh.kt` provides it with the JSch library.
+output becomes lines, and `AndroidSsh.kt` provides it with the JSch library. So does the weather:
+`shell/Weather.kt` is what the shell asks for, and `OpenMeteo.kt` fetches and reads it.
 `demo/index.html` is the original browser mock-up.
 
 ## Release
@@ -169,3 +189,5 @@ produces the same signed build locally.
 The typeface is IBM Plex Mono, under the SIL Open Font License (`licenses/IBM-Plex-Mono-OFL.txt`).
 SSH connections are made with [JSch](https://github.com/mwiede/jsch), under BSD-style licenses
 (`licenses/JSch-LICENSE.txt`).
+Weather data is by [Open-Meteo](https://open-meteo.com), under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

@@ -665,7 +665,7 @@ private fun PromptLine(
             visualTransformation = if (mask) PasswordVisualTransformation('*') else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.None,
-                autoCorrect = false,
+                autoCorrectEnabled = false,
                 // the password type also stops the keyboard from suggesting or learning what is typed
                 keyboardType = if (mask) KeyboardType.Password else KeyboardType.Ascii,
                 imeAction = ImeAction.Go,

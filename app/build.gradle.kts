@@ -73,7 +73,10 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+    // 2025.02.00 is Compose 1.7.8. Compose 1.6 crashes in the text field on Android 16 when the
+    // window loses the focus, as it does to Android's own unlock screen, while the keyboard is
+    // following the cursor (a null check added in 1.7). Do not go back below 1.7.
+    implementation(platform("androidx.compose:compose-bom:2025.02.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.activity:activity-compose:1.8.2")
@@ -82,4 +85,6 @@ dependencies {
     implementation("com.github.mwiede:jsch:2.28.8")
 
     testImplementation("junit:junit:4.13.2")
+    // Android's own JSON reader is only a stub off the phone. This is the same one, for the tests.
+    testImplementation("org.json:json:20240303")
 }
