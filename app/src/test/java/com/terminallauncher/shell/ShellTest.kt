@@ -5,7 +5,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import java.util.Locale
+import java.util.TimeZone
 
 private class FakePhone : Phone {
     val names = listOf(
@@ -51,6 +54,12 @@ private class FakePhone : Phone {
     override fun setBrightness(percent: Int): Boolean { if (!canWriteSettings) return false; bright = percent; return true }
     override fun battery() = Battery(82, false)
     override fun wifiOn() = true
+    override fun system() = SystemInfo("android 14", "pixel 8", "1080x2400", 3 * 24 * 60 + 4 * 60 + 5, 41, 128)
+
+    var track: Track? = null
+    val keys = ArrayList<MediaKey>()
+    override fun nowPlaying(): Track? = if (notifAccess) track else null
+    override fun media(key: MediaKey): Boolean { keys += key; return track != null }
     override fun openPanel(panel: Panel): Boolean { panels += panel; return true }
     override fun setup() = listOf(SetupItem("home", "default home app", true), SetupItem("notifs", "read notifications", notifAccess))
     override fun fix(key: String): Boolean { fixed += key; return key != "home" }
@@ -83,12 +92,23 @@ class ShellTest {
 
     private fun shell() = Shell(phone, store, vault) { time }.also { s -> s.onChange = { changes++ }; s.start() }
 
+    /** 1_795_000_000_000 is Wednesday 18 November 2026, 11:06 UTC. Weeks start on Monday. */
+    @Before fun fixedCalendar() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+        Locale.setDefault(Locale.UK)
+    }
+
     private fun Shell.text(): String = lines.joinToString("\n") { line ->
         when (line) {
             is TextLine -> line.spans.joinToString("") { it.text }
             is AppGrid -> line.names.joinToString(" | ")
             LockHeader -> "<lock header>"
             is Lockout -> "<lockout>"
+            is Gauge -> "${line.label} ${line.percent} ${line.note}"
+            is Fetch -> line.rows.joinToString("\n") { row -> row.spans.joinToString("") { it.text } }
+            is Launching -> "opening ${line.name}"
+            is Note -> "${line.app}: ${line.text}"
+            is NowPlaying -> "${line.track.title} by ${line.track.artist}"
         }
     }
 
@@ -295,7 +315,7 @@ class ShellTest {
         assertTrue(s.text().contains("foo: command not found"))
         assertFalse(s.text().contains("did you mean"))
         s.run("opne")
-        assertTrue(s.text().contains("did you mean 'open'?"))
+        assertTrue(s.text().contains("did you mean open?"))
         assertTrue(phone.launched.isEmpty())
     }
 
@@ -317,9 +337,9 @@ class ShellTest {
 
     @Test fun chipsForFirstWordMixCommandsAndApps() {
         val s = shell()
-        assertEquals(listOf("call", "calculator", "calendar"), s.chips("cal"))
-        assertEquals(ChipKind.CMD, s.candidates("cal")!!.items[0].kind)
-        assertEquals(ChipKind.APP, s.candidates("cal")!!.items[1].kind)
+        assertEquals(listOf("call", "cal", "calculator", "calendar"), s.chips("cal"))
+        assertEquals(ChipKind.CMD, s.candidates("cal")!!.items[1].kind)
+        assertEquals(ChipKind.APP, s.candidates("cal")!!.items[2].kind)
         assertEquals(emptyList<String>(), s.chips(""))
     }
 
@@ -338,7 +358,9 @@ class ShellTest {
         assertEquals(listOf("mom"), s.chips("call m"))
         assertEquals(listOf("john smith", "john doe"), s.chips("sms jo"))
         assertEquals(emptyList<String>(), s.chips("sms mom jo"))
-        assertEquals(listOf("green"), s.chips("theme g"))
+        assertEquals(listOf("green", "gruvbox"), s.chips("theme g"))
+        assertEquals(listOf("rain"), s.chips("saver r"))
+        assertEquals(listOf("pause", "play", "prev"), s.chips("np p"))
         assertEquals(listOf("on", "off"), s.chips("torch "))
         assertEquals(listOf("-l", "media"), s.chips("ls "))
         assertEquals(listOf("notifs"), s.chips("setup n"))
@@ -494,6 +516,242 @@ class ShellTest {
         assertTrue(s.text().contains("lock the phone"))
         val widest = s.lines.filterIsInstance<TextLine>().maxOf { l -> l.spans.sumOf { it.text.length } }
         assertTrue("help line is $widest columns wide", widest <= 36)
+    }
+
+    /* ---------- waking, the boot log, the login summary ---------- */
+
+    private fun asleep(): Shell {
+        vault.password = "pw"
+        return shell().also { it.lock() }
+    }
+
+    @Test fun everyLineHasARisingId() {
+        val s = shell().run("date", "help", "clear", "date")
+        assertEquals(s.lines.size, s.lineIds.size)
+        assertEquals(s.lineIds.sorted(), s.lineIds)
+        assertEquals(s.lineIds.size, s.lineIds.toSet().size)
+        assertEquals("what was typed does not print itself out again", Entrance.NONE, (s.lines[0] as TextLine).entrance)
+    }
+
+    @Test fun screenOffLeavesABlankPageAndWakingPrintsTheBootLogOnce() {
+        val s = asleep()
+        assertTrue(s.locked)
+        assertTrue(s.lines.isEmpty())
+        val before = s.cueSeq
+
+        s.wake()
+        assertEquals(Cue.POWER_ON, s.cue)
+        assertEquals(before + 1, s.cueSeq)
+        assertTrue(s.text().startsWith("[ 0.000] tty1: waking"))
+        assertTrue(s.text().contains("[ ok ] display        1080x2400"))
+        assertTrue(s.text().contains("[ ok ] apps           21 found"))
+        assertTrue(s.text().contains("[ ok ] notifications  2 waiting"))
+        assertTrue(s.text().contains("[ ok ] battery        82%"))
+        assertEquals(LockHeader, s.lines.last())
+        assertEquals(PromptKind.LOGIN, s.prompt!!.kind)
+
+        val ids = s.lineIds
+        s.wake()                                 // a second sign of the same wake
+        assertEquals(ids, s.lineIds)
+        assertEquals(before + 1, s.cueSeq)
+    }
+
+    @Test fun bootLogStaysPutThroughAWrongPassword() {
+        val s = asleep().also { it.wake() }
+        val boot = s.lineIds
+        s.run("nope")
+        assertEquals("the boot log keeps its lines, so it is not printed again", boot, s.lineIds.take(boot.size))
+        assertTrue(s.text().endsWith("<lock header>\nLogin incorrect"))
+        s.run("nope again")
+        assertEquals(1, Regex("Login incorrect").findAll(s.text()).count())
+    }
+
+    @Test fun aLockoutOutlastsTheScreenGoingOffAndOn() {
+        vault.password = "pw"
+        val s = shell().run("x", "x", "x")
+        s.lock()
+        s.wake()
+        assertNull(s.prompt)
+        assertTrue(s.lines.last() is Lockout)
+        time += 11_000
+        s.tick()
+        assertEquals(PromptKind.LOGIN, s.prompt!!.kind)
+        assertTrue(s.text().contains("tty1: waking"))
+    }
+
+    @Test fun wakingWithoutAPasswordOnlyTurnsTheScreenOn() {
+        val s = shell().run("date")
+        val text = s.text()
+        assertFalse(s.lock())
+        s.wake()
+        assertEquals(Cue.POWER_ON, s.cue)
+        assertEquals(text, s.text())
+    }
+
+    @Test fun loginDissolvesTheLockAndPrintsTheSummary() {
+        vault.password = "pw"
+        store.map["seen"] = "1"
+        store.map["last_login"] = (time - 3_600_000).toString()
+        val s = shell().run("pw")
+        assertEquals(Cue.GRANTED, s.cue)
+        assertTrue(s.text().startsWith("Last login: Wed 18 Nov 10:06 on tty1"))
+        assertEquals(
+            listOf(Gauge("day", 46, "46%"), Gauge("week", 42, "wed"), Gauge("year", 88, "88%")),
+            s.lines.filterIsInstance<Gauge>(),
+        )
+        assertTrue(s.text().contains("2 new · wifi · torch off"))
+        assertTrue(s.text().contains("tip: help lists every command"))
+        val count = s.lines.filterIsInstance<TextLine>().first { l -> l.spans.any { it.text == "2 new" } }.spans.first()
+        assertEquals("notifs", count.run)
+
+        s.run("lock")
+        assertEquals(Cue.POWER_OFF, s.cue)
+        s.run("pw")
+        assertTrue("a different tip each login", s.text().contains("tip: ↑ recalls your last command"))
+    }
+
+    @Test fun firstStartRaisesNoCue() {
+        assertNull(shell().cue)
+    }
+
+    @Test fun animationsCanBeTurnedOff() {
+        vault.password = "pw"
+        val s = shell().run("pw", "fx off")
+        assertFalse(s.motion)
+        assertFalse(Shell(phone, store, vault) { time }.motion)
+        s.lock()
+        s.wake()
+        assertEquals("no boot log", "<lock header>", s.text())
+        s.run("pw", "fx on", "fx sideways")
+        assertTrue(s.motion)
+        assertTrue(s.text().contains("fx: expected on or off"))
+    }
+
+    /* ---------- the new commands ---------- */
+
+    @Test fun typosOfferTheWholeLineBack() {
+        val s = shell().run("opne maps")
+        val line = s.lines.last() as TextLine
+        assertEquals("did you mean open maps?", line.spans.joinToString("") { it.text })
+        assertEquals("tapping it fills the prompt", "open maps", line.spans[1].fill)
+        assertNull("and does not run it", line.spans[1].run)
+        assertEquals(Entrance.SHAKE, (s.lines[s.lines.size - 2] as TextLine).entrance)
+        assertTrue(phone.launched.isEmpty())
+
+        s.run("mapss")
+        assertEquals("maps", (s.lines.last() as TextLine).spans[1].fill)
+        s.run("thme green")
+        assertEquals("theme green", (s.lines.last() as TextLine).spans[1].fill)
+    }
+
+    @Test fun launchingPrintsALineTheScreenCanGrow() {
+        val s = shell().run("maps")
+        assertEquals(Launching("maps"), s.lines.last())
+    }
+
+    @Test fun calPrintsTheMonthWithTodayMarked() {
+        val s = shell().run("clear", "cal")
+        val text = s.text().lines()
+        assertEquals("   November 2026", text[1])
+        assertEquals("Mo Tu We Th Fr Sa Su", text[2])
+        assertEquals("                   1", text[3])
+        assertEquals(" 2  3  4  5  6  7  8", text[4])
+        assertEquals("30", text[8])
+        val marked = s.lines.filterIsInstance<TextLine>().flatMap { it.spans }.filter { it.style == Style.MARK }
+        assertEquals(listOf("18"), marked.map { it.text })
+
+        s.run("clear", "cal feb 2024")
+        assertTrue(s.text().contains("   February 2024"))
+        assertTrue(s.text().contains("26 27 28 29"))
+        assertTrue("another month has no today", s.lines.filterIsInstance<TextLine>().none { l -> l.spans.any { it.style == Style.MARK } })
+        s.run("cal 12")
+        assertTrue(s.text().contains("   December 2026"))
+        s.run("cal 13", "cal smarch", "cal 1 year", "cal 1 2 3")
+        assertTrue(s.text().contains("cal: no month '13'"))
+        assertTrue(s.text().contains("cal: no month 'smarch'"))
+        assertTrue(s.text().contains("cal: no year 'year'"))
+        assertTrue(s.text().contains("usage: cal"))
+    }
+
+    @Test fun calFollowsTheRegionsWeek() {
+        Locale.setDefault(Locale.US)
+        val text = shell().run("clear", "cal").text().lines()
+        assertEquals("Su Mo Tu We Th Fr Sa", text[2])
+        assertEquals(" 1  2  3  4  5  6  7", text[3])
+    }
+
+    @Test fun fetchPrintsTheSystemCard() {
+        val s = shell().run("fetch")
+        val card = s.text().lines().takeLast(7)
+        assertEquals(
+            listOf("phone@tty1", "os      android 14", "device  pixel 8", "up      3d 4h", "apps    21", "batt    82%", "disk    41 / 128 GB"),
+            card,
+        )
+    }
+
+    @Test fun nowPlayingShowsTheTrackAndTakesKeys() {
+        val s = shell().run("np")
+        assertTrue(s.text().contains("np: nothing is playing"))
+        phone.track = Track("low tide", "night drive", true, 131_000, 220_000)
+        s.run("np")
+        assertEquals(NowPlaying(phone.track!!), s.lines.last())
+        s.run("np next", "np prev", "np pause", "np play")
+        assertEquals(listOf(MediaKey.NEXT, MediaKey.PREVIOUS, MediaKey.PAUSE, MediaKey.PLAY), phone.keys)
+        assertTrue(s.text().contains("next track"))
+        s.run("np louder")
+        assertTrue(s.text().contains("usage: np"))
+        assertEquals(4, phone.keys.size)
+
+        phone.notifAccess = false
+        s.run("np")
+        assertTrue(s.text().contains("np: notification access is off"))
+        assertEquals("setup notifs", (s.lines.last() as TextLine).spans.last().run)
+    }
+
+    @Test fun notificationsArriveAboveThePromptButNeverOnTheLockScreen() {
+        val s = shell()
+        s.notify(Notif("messages", "Mom", "are you\ncoming on Sunday?", 0))
+        assertEquals(Note("messages", "Mom: are you coming on Sunday?", time), s.lines.last())
+        s.notify(Notif("mail", "", "", 0))
+        assertEquals("nothing to say, nothing printed", 1, s.lines.count { it is Note })
+
+        vault.password = "pw"
+        s.lock()
+        s.wake()
+        val text = s.text()
+        s.notify(Notif("messages", "Mom", "hello?", 0))
+        assertEquals(text, s.text())
+    }
+
+    @Test fun themesListAsTappableWordsThatFitTheScreen() {
+        val s = shell().run("clear", "theme")
+        val rows = s.lines.filterIsInstance<TextLine>().drop(1)
+        val words = rows.flatMap { it.spans }.filter { it.run != null }
+        assertEquals(Shell.THEMES.map { "theme $it" }, words.map { it.run })
+        assertEquals("[default]", words[0].text)
+        assertTrue(rows.all { r -> r.spans.sumOf { it.text.length } <= 36 })
+        s.run("theme synthwave")
+        assertEquals("synthwave", s.theme)
+    }
+
+    @Test fun saverIsChosenPersistsAndCanBeShown() {
+        val s = shell()
+        assertEquals(Shell.SAVER_SHUFFLE, s.saver)
+        s.run("saver rain")
+        assertEquals("rain", s.saver)
+        assertEquals("rain", Shell(phone, store, vault) { time }.saver)
+        assertEquals("saver show", (s.lines.last() as TextLine).spans.last().run)
+        s.run("saver show")
+        assertEquals(Cue.SAVER, s.cue)
+
+        val seq = s.cueSeq
+        s.run("saver off", "saver show", "saver disco")
+        assertEquals(Shell.SAVER_OFF, s.saver)
+        assertEquals("an off screensaver does not start", seq, s.cueSeq)
+        assertTrue(s.text().contains("saver: it is off"))
+        assertTrue(s.text().contains("no screensaver 'disco'"))
+        s.run("clear", "saver")
+        assertTrue(s.text().contains("[off]"))
     }
 
     @Test fun clearAndCtrlL() {

@@ -1,5 +1,7 @@
 package com.terminallauncher.shell
 
+import java.util.Calendar
+
 /**
  * The terminal session: the lock screen, the prompt, and every command.
  *
@@ -14,16 +16,42 @@ class Shell(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
-        val THEMES = listOf("default", "green", "amber", "eink")
+        val THEMES = listOf(
+            "default", "green", "amber", "eink", "nord", "gruvbox", "dracula", "solarized", "synthwave", "paper",
+        )
+
+        /** The lock screen's screensavers. [SAVER_SHUFFLE] runs a different one each time. */
+        val SAVERS = listOf("rain", "stars", "life", "clock")
+        const val SAVER_SHUFFLE = "shuffle"
+        const val SAVER_OFF = "off"
+        private val SAVER_CHOICES = SAVERS + SAVER_SHUFFLE + SAVER_OFF
 
         private const val MAX_LINES = 400
         private const val MAX_HISTORY = 100
         private const val MAX_RECENTS = 6
+        private const val WRAP = 34            // columns a row of tappable words may fill
         private const val KEY_THEME = "theme"
         private const val KEY_ALIASES = "aliases"
         private const val KEY_RECENTS = "recents"
         private const val KEY_LAST_LOGIN = "last_login"
         private const val KEY_SEEN = "seen"
+        private const val KEY_SAVER = "saver"
+        private const val KEY_FX = "fx"
+        private const val KEY_TIP = "tip"
+        private val TIPS = listOf(
+            "help lists every command",
+            "↑ recalls your last command",
+            "an app's name alone opens it",
+            "alias s=open spotify makes a shortcut",
+            "np shows what is playing",
+            "notifs clear dismisses them all",
+            "theme lists the color themes",
+            "cal 12 shows December",
+            "saver picks the lock screensaver",
+            "ls -l lists apps with their kind",
+            "fetch prints the system card",
+            "fx off turns the animations off",
+        )
         private val SHELL_PROMPT = Prompt("$ ", PromptKind.SHELL)
         private val LOGIN_PROMPT = Prompt("password: ", PromptKind.LOGIN, mask = true)
         private val TOKEN = Regex("\"[^\"]*\"|'[^']*'|\\S+")
@@ -41,12 +69,35 @@ class Shell(
     var lines: List<Line> = emptyList()
         private set
 
+    /**
+     * One id per line, in step with [lines]. Ids only ever rise, so the UI can tell which lines are
+     * new and print those one after another.
+     */
+    var lineIds: List<Long> = emptyList()
+        private set
+
     /** null while the terminal takes no input (the lock screen during a lockout). */
     var prompt: Prompt? = null
         private set
     var locked: Boolean = false
         private set
     var theme: String = store.get(KEY_THEME)?.takeIf { it in THEMES } ?: THEMES[0]
+        private set
+
+    /** One of [SAVERS], [SAVER_SHUFFLE] or [SAVER_OFF]. */
+    var saver: String = store.get(KEY_SAVER)?.takeIf { it in SAVER_CHOICES } ?: SAVER_SHUFFLE
+        private set
+
+    /** false after `fx off`: no animations, and no boot log on waking. */
+    var motion: Boolean = store.get(KEY_FX) != "off"
+        private set
+
+    /** The latest [Cue], a number that rises with each one, and when it was raised. */
+    var cue: Cue? = null
+        private set
+    var cueSeq: Int = 0
+        private set
+    var cueAt: Long = 0
         private set
     var onChange: () -> Unit = {}
 
@@ -58,6 +109,13 @@ class Shell(
     private var recents: List<String> = store.get(KEY_RECENTS)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
     private var pending: ((String) -> Unit)? = null
     private var fails = 0
+    private var nextId = 0L
+
+    /** Until this time the lock screen takes no input. It outlasts the screen going off and on. */
+    private var lockoutUntil = 0L
+
+    /** The screen is off. A locked terminal keeps a blank page until [wake] fills it in. */
+    private var asleep = false
 
     /** The password was right and Android is asking for its own unlock. See [awaitPhone]. */
     private var waitingForPhone = false
@@ -82,6 +140,7 @@ class Shell(
     }
 
     fun submit(input: String) {
+        if (asleep) wake()                 // typing means the screen is on, whatever else was heard
         val p = prompt ?: return
         when (p.kind) {
             PromptKind.LOGIN -> login(input)
@@ -123,22 +182,42 @@ class Shell(
     /** Ctrl+L. */
     fun clear() {
         if (locked) return
-        lines = emptyList()
+        page(emptyList())
         onChange()
     }
 
     /**
-     * Locks the terminal and wipes the scrollback. Returns false, and does nothing, when no password is
-     * set, because there would be no way back in.
+     * Call when the screen turns off. Locks the terminal and wipes the scrollback. Returns false, and
+     * locks nothing, when no password is set, because there would be no way back in.
+     *
+     * The locked page is left blank: nobody can see it, and [wake] prints it when the screen comes
+     * back. A login that was still waiting for Android's unlock starts over from the password.
      */
     fun lock(): Boolean {
+        asleep = true
         if (!vault.isSet) return false
-        // A login that was still waiting for Android's unlock starts over from the password.
-        if (!locked || waitingForPhone) {
-            showLock()
-            onChange()
-        }
+        locked = true
+        waitingForPhone = false
+        pending = null
+        page(emptyList())
+        prompt = if (lockoutUntil > now()) null else LOGIN_PROMPT
+        onChange()
         return true
+    }
+
+    /**
+     * Call when the screen turns on. Does nothing unless [lock] ran since the last time, so several
+     * signs of the same wake are fine.
+     */
+    fun wake() {
+        if (!asleep) return
+        asleep = false
+        cue(Cue.POWER_ON)
+        if (locked) {
+            page((if (motion) bootLog() else emptyList()) + LockHeader)
+            showLock(if (lockoutUntil > now()) "Login incorrect" else null)
+        }
+        onChange()
     }
 
     /** Call about once a second while visible: ends a lockout when its time is up. */
@@ -150,16 +229,29 @@ class Shell(
                 openHome()
                 onChange()
             }
-        } else if (prompt == null && lines.none { it is Lockout && it.until > now() }) {
+        } else if (prompt == null && lockoutUntil <= now()) {
             showLock()
             onChange()
         }
     }
 
     /** Prints a line from outside the shell, such as the outcome of a permission dialog. */
-    fun info(text: String) {
+    fun info(text: String, error: Boolean = false) {
         if (locked) return
-        print(text, Style.DIM)
+        print(text, if (error) Style.ERR else Style.DIM)
+        onChange()
+    }
+
+    /**
+     * A notification arrived while the terminal was on screen. It is printed above the prompt. A
+     * locked terminal prints nothing: the lock screen only ever shows how many are waiting.
+     */
+    fun notify(n: Notif) {
+        if (locked) return
+        val body = listOf(n.title, n.text).filter { it.isNotBlank() }.joinToString(": ")
+            .replace(Regex("\\s+"), " ").let { if (it.length > 160) it.take(159) + "…" else it }
+        if (body.isEmpty()) return
+        add(Note(n.app, body, now()))
         onChange()
     }
 
@@ -200,6 +292,9 @@ class Shell(
             word == "call" || word == "sms" ->
                 if (firstArg) lastWord(phone.contacts().orEmpty().map { it.name }.distinct()) else none
             word == "theme" -> if (firstArg) lastWord(THEMES) else none
+            word == "saver" -> if (firstArg) lastWord(SAVER_CHOICES + "show") else none
+            word == "np" -> if (firstArg) lastWord(listOf("pause", "play", "next", "prev")) else none
+            word == "fx" -> if (firstArg) lastWord(listOf("on", "off")) else none
             word == "torch" -> if (firstArg) lastWord(listOf("on", "off")) else none
             word == "notifs" -> if (firstArg) lastWord(listOf("clear")) else none
             word == "unalias" -> if (firstArg) lastWord(aliases.keys.toList()) else none
@@ -233,14 +328,50 @@ class Shell(
 
     private fun add(line: Line) {
         lines = (lines + line).takeLast(MAX_LINES)
+        lineIds = (lineIds + nextId++).takeLast(MAX_LINES)
+    }
+
+    /** Replaces everything on screen. */
+    private fun page(content: List<Line>) {
+        lines = content
+        lineIds = content.map { nextId++ }
     }
 
     private fun print(text: String = "", style: Style = Style.NORMAL) = add(TextLine(listOf(Span(text, style))))
 
     private fun row(vararg spans: Span) = add(TextLine(spans.toList()))
 
-    private fun echo(p: Prompt, text: String) =
-        row(Span(p.text, if (p.kind == PromptKind.SHELL) Style.ACCENT else Style.NORMAL), Span(text))
+    /** What was typed is already on screen, so its echo does not print itself out again. */
+    private fun echo(p: Prompt, text: String) = add(
+        TextLine(
+            listOf(Span(p.text, if (p.kind == PromptKind.SHELL) Style.ACCENT else Style.NORMAL), Span(text)),
+            Entrance.NONE,
+        ),
+    )
+
+    /** Tappable words on as many rows as they need, with the current one in brackets. */
+    private fun choices(words: List<String>, current: String, command: String) {
+        var spans = ArrayList<Span>()
+        var width = 0
+        for (word in words) {
+            val label = if (word == current) "[$word]" else word
+            if (width > 0 && width + 2 + label.length > WRAP) {
+                add(TextLine(spans))
+                spans = ArrayList()
+                width = 0
+            }
+            if (width > 0) spans += Span("  ")
+            spans += Span(label, if (word == current) Style.ACCENT else Style.APP, "$command $word")
+            width += (if (width > 0) 2 else 0) + label.length
+        }
+        if (spans.isNotEmpty()) add(TextLine(spans))
+    }
+
+    private fun cue(c: Cue) {
+        cue = c
+        cueSeq++
+        cueAt = now()
+    }
 
     /** An error that the user can fix by granting access, with a tappable way to do it. */
     private fun needs(key: String, message: String) {
@@ -250,12 +381,33 @@ class Shell(
 
     /* ---------------- lock screen and login ---------------- */
 
+    /**
+     * Cuts a lock page back to its header, keeping the boot log above it, or starts a new page with
+     * just the header if the lock screen is not what is showing.
+     */
+    private fun toLockHeader() {
+        val at = if (locked) lines.indexOf(LockHeader) else -1
+        if (at < 0) {
+            page(listOf(LockHeader))
+        } else {
+            lines = lines.take(at + 1)
+            lineIds = lineIds.take(at + 1)
+        }
+    }
+
     private fun showLock(note: String? = null) {
+        toLockHeader()
         locked = true
         waitingForPhone = false
         pending = null
-        lines = listOfNotNull(LockHeader, note?.let { TextLine(listOf(Span(it, Style.ERR))) })
-        prompt = LOGIN_PROMPT
+        // These sit under the password prompt and change with every try, so they do not print themselves out.
+        if (note != null) add(TextLine(listOf(Span(note, Style.ERR)), Entrance.NONE))
+        if (lockoutUntil > now()) {
+            add(Lockout(lockoutUntil))
+            prompt = null
+        } else {
+            prompt = LOGIN_PROMPT
+        }
     }
 
     private fun login(password: String) {
@@ -265,15 +417,26 @@ class Shell(
             return
         }
         fails++
-        if (fails % 3 != 0) {
-            showLock("Login incorrect")
-            return
-        }
         // every third miss costs a wait, and the waits get longer
-        val seconds = when (fails / 3) { 1 -> 10; 2 -> 30; else -> 60 }
+        if (fails % 3 == 0) lockoutUntil = now() + when (fails / 3) { 1 -> 10; 2 -> 30; else -> 60 } * 1000L
         showLock("Login incorrect")
-        add(Lockout(now() + seconds * 1000L))
-        prompt = null
+    }
+
+    /** What a waking terminal prints above the lock header. All of it is already on the lock screen. */
+    private fun bootLog(): List<Line> {
+        fun ok(name: String, value: String) = TextLine(
+            listOf(Span("[ ", Style.DIM), Span("ok", Style.OK), Span(" ] ", Style.DIM), Span(name.padEnd(15)), Span(value, Style.DIM)),
+        )
+        val out = ArrayList<Line>()
+        out += TextLine(listOf(Span("[ 0.000] tty1: waking", Style.DIM)))
+        out += ok("display", phone.system().display)
+        out += ok("keyboard", "ready")
+        out += ok("apps", "${phone.apps().size} found")
+        phone.notifications()?.let { out += ok("notifications", if (it.isEmpty()) "none" else "${it.size} waiting") }
+        val battery = phone.battery()
+        out += ok("battery", "${battery.percent}%" + if (battery.charging) " charging" else "")
+        out += TextLine(listOf(Span("")))
+        return out
     }
 
     /**
@@ -283,8 +446,9 @@ class Shell(
      */
     private fun awaitPhone() {
         val attempt = ++unlockAttempt
+        toLockHeader()
         waitingForPhone = true
-        lines = listOf(LockHeader, TextLine(listOf(Span("unlock the phone to continue", Style.DIM))))
+        add(TextLine(listOf(Span("unlock the phone to continue", Style.DIM)), Entrance.NONE))
         prompt = null
         phone.unlockDevice { unlocked ->
             // Out of date if the terminal was locked again, or let in by tick(), while Android was asking.
@@ -296,11 +460,12 @@ class Shell(
     }
 
     private fun openHome() {
+        if (locked) cue(Cue.GRANTED)
         locked = false
         waitingForPhone = false
         pending = null
         prompt = SHELL_PROMPT
-        lines = emptyList()
+        page(emptyList())
         val last = store.get(KEY_LAST_LOGIN)?.toLongOrNull()
         if (store.get(KEY_SEEN) == null) {
             store.put(KEY_SEEN, "1")
@@ -311,10 +476,33 @@ class Shell(
             print("help     every command", Style.DIM)
         } else {
             if (last != null) print("Last login: ${Fmt.day(last)} ${Fmt.hhmm(last)} on tty1", Style.DIM)
-            print("Type help for commands.", Style.DIM)
+            motd()
         }
         print()
         store.put(KEY_LAST_LOGIN, now().toString())
+    }
+
+    /** The message of the day: how far along the day, week and year are, what is waiting, and a tip. */
+    private fun motd() {
+        val t = now()
+        print()
+        add(Gauge("day", Fmt.dayPercent(t), "${Fmt.dayPercent(t)}%"))
+        add(Gauge("week", Fmt.weekPercent(t), Fmt.weekday(t).lowercase()))
+        add(Gauge("year", Fmt.yearPercent(t), "${Fmt.yearPercent(t)}%"))
+        print()
+
+        val status = ArrayList<Span>()
+        phone.notifications()?.let {
+            status += if (it.isEmpty()) Span("nothing new", Style.DIM) else Span("${it.size} new", Style.APP, "notifs")
+        }
+        status += Span(if (phone.wifiOn()) "wifi" else "wifi off", Style.DIM)
+        phone.torch()?.let { status += Span(if (it) "torch on" else "torch off", Style.DIM) }
+        add(TextLine(status.flatMapIndexed { i, s -> if (i == 0) listOf(s) else listOf(Span(" · ", Style.DIM), s) }))
+
+        // a different tip each login
+        val turn = (store.get(KEY_TIP)?.toIntOrNull() ?: 0).coerceAtLeast(0)
+        store.put(KEY_TIP, ((turn + 1) % TIPS.size).toString())
+        print("tip: ${TIPS[turn % TIPS.size]}", Style.DIM)
     }
 
     /* ---------------- running a line ---------------- */
@@ -366,8 +554,9 @@ class Shell(
                 add(AppGrid(found.map { it.name }))
             }
             else -> {
-                print("${toks[0]}: command not found", Style.ERR)
-                nearest(name)?.let { print("did you mean '$it'?", Style.DIM) }
+                add(TextLine(listOf(Span("${toks[0]}: command not found", Style.ERR)), Entrance.SHAKE))
+                // Tapping the fix puts it at the prompt. It does not run: it could be a call.
+                suggest(line)?.let { row(Span("did you mean ", Style.DIM), Span(it, Style.APP, fill = it), Span("?", Style.DIM)) }
             }
         }
     }
@@ -399,11 +588,11 @@ class Shell(
     }
 
     private fun launch(app: AppEntry) {
-        print("opening ${app.name}", Style.DIM)
         if (!phone.launch(app)) {
             print("open: could not start ${app.name}", Style.ERR)
             return
         }
+        add(Launching(app.name))
         recents = (listOf(app.name) + recents.filter { it != app.name }).take(MAX_RECENTS)
         store.put(KEY_RECENTS, recents.joinToString("\n"))
     }
@@ -457,9 +646,9 @@ class Shell(
         return row[b.length]
     }
 
-    private fun nearest(word: String): String? {
-        val names = commands.values.filter { it.group != null }.map { it.name } + phone.apps().map { it.name }
-        if (word.length >= 2) names.firstOrNull { it.startsWith(word) }?.let { return it }
+    /** The name closest to [word] and how many slips apart they are. A name [word] starts counts as none. */
+    private fun nearest(word: String, names: List<String>): Pair<String, Int>? {
+        if (word.length >= 2) names.firstOrNull { it.startsWith(word) }?.let { return it to 0 }
         var best: String? = null
         var bestD = if (word.length <= 3) 2 else 3     // one slip in a short word, two in a longer one
         for (n in names) {
@@ -469,7 +658,25 @@ class Shell(
                 bestD = d
             }
         }
-        return best
+        return best?.let { it to bestD }
+    }
+
+    /**
+     * The line the user most likely meant: the first word corrected to a command with the rest kept,
+     * or an app's name, whichever is the smaller change.
+     */
+    private fun suggest(line: String): String? {
+        val q = line.trim().lowercase()
+        val first = q.substringBefore(' ')
+        val rest = q.substringAfter(' ', "").trim()
+        val apps = phone.apps().map { it.name }
+        val command = nearest(first, commands.values.filter { it.group != null }.map { it.name })
+        val app = nearest(q, apps) ?: if (rest.isEmpty()) null else nearest(first, apps)
+        return when {
+            command != null && (app == null || command.second <= app.second) ->
+                if (rest.isEmpty()) command.first else "${command.first} $rest"
+            else -> app?.first
+        }
     }
 
     /* ---------------- commands ---------------- */
@@ -626,16 +833,116 @@ class Shell(
             val b = phone.battery()
             print("${b.percent}%  ${if (b.charging) "charging" else "on battery"}")
         }
+        def("np", "phone", "np [next|prev]", "now playing") { args, _ ->
+            val word = args.firstOrNull()?.lowercase()
+            val key = when (word) {
+                null -> null
+                "next" -> MediaKey.NEXT
+                "prev", "previous" -> MediaKey.PREVIOUS
+                "pause", "stop" -> MediaKey.PAUSE
+                "play" -> MediaKey.PLAY
+                else -> {
+                    print("usage: np [pause|play|next|prev]", Style.ERR)
+                    return@def
+                }
+            }
+            val track = phone.nowPlaying()
+            when {
+                // Android only shows the media player to apps that may read notifications
+                phone.notifications() == null -> needs("notifs", "np: notification access is off")
+                track == null -> print("np: nothing is playing", Style.DIM)
+                key == null -> add(NowPlaying(track))
+                phone.media(key) -> print(
+                    when (key) {
+                        MediaKey.NEXT -> "next track"
+                        MediaKey.PREVIOUS -> "previous track"
+                        MediaKey.PAUSE -> "paused"
+                        MediaKey.PLAY -> "playing"
+                    },
+                    Style.DIM,
+                )
+                else -> print("np: the player did not answer", Style.ERR)
+            }
+        }
 
         def("date", "system", "date", "date and time") { _, _ -> print(Fmt.full(now())) }
+        def("cal", "system", "cal [mon] [year]", "month calendar") { args, _ ->
+            val today = Calendar.getInstance().apply { timeInMillis = now() }
+            val word = args.getOrNull(0)?.lowercase()
+            val month = when {
+                word == null -> today.get(Calendar.MONTH)
+                word.toIntOrNull() != null -> (word.toInt() - 1).takeIf { it in 0..11 }
+                else -> Fmt.MONTH_NAMES.indexOfFirst { word.length >= 3 && it.lowercase().startsWith(word) }.takeIf { it >= 0 }
+            }
+            val year = if (args.size < 2) today.get(Calendar.YEAR) else args[1].toIntOrNull()?.takeIf { it in 1..9999 }
+            if (args.size > 2) print("usage: cal [month] [year]", Style.ERR)
+            else if (month == null) print("cal: no month '${args[0]}'", Style.ERR)
+            else if (year == null) print("cal: no year '${args[1]}'", Style.ERR)
+            else calendar(month, year, today)
+        }
+        def("fetch", "system", "fetch", "system card") { _, _ ->
+            val sys = phone.system()
+            val battery = phone.battery()
+            fun fact(name: String, value: String) = TextLine(listOf(Span(name.padEnd(8), Style.DIM), Span(value)))
+            add(
+                Fetch(
+                    listOf(
+                        TextLine(listOf(Span("phone@tty1", Style.ACCENT))),
+                        fact("os", sys.os),
+                        fact("device", sys.device),
+                        fact("up", Fmt.span(sys.uptimeMinutes)),
+                        fact("apps", phone.apps().size.toString()),
+                        fact("batt", "${battery.percent}%" + if (battery.charging) " charging" else ""),
+                        fact("disk", "${sys.diskUsedGb} / ${sys.diskTotalGb} GB"),
+                    ),
+                ),
+            )
+        }
         def("theme", "system", "theme [name]", "color theme") { args, _ ->
             val t = args.firstOrNull()?.lowercase()
-            if (t == null) print(THEMES.joinToString("  ") { if (it == theme) "[$it]" else it })
-            else if (t !in THEMES) print("theme: no theme '${args[0]}'. Try ${THEMES.joinToString(", ")}", Style.ERR)
-            else {
+            if (t == null) choices(THEMES, theme, "theme")
+            else if (t !in THEMES) {
+                print("theme: no theme '${args[0]}'. Try one of", Style.ERR)
+                choices(THEMES, theme, "theme")
+            } else {
                 theme = t
                 store.put(KEY_THEME, t)
                 print("theme $t")
+            }
+        }
+        def("saver", "system", "saver [name]", "lock screensaver") { args, _ ->
+            val word = args.firstOrNull()?.lowercase()
+            when {
+                word == null -> {
+                    print(if (saver == SAVER_OFF) "No screensaver." else "After 30s idle on the lock screen,", Style.DIM)
+                    if (saver != SAVER_OFF) print("while charging, for up to 10 min.", Style.DIM)
+                    choices(SAVER_CHOICES, saver, "saver")
+                    if (saver != SAVER_OFF) row(Span("see it now: ", Style.DIM), Span("saver show", Style.APP, "saver show"))
+                }
+                word == "show" || word == "preview" ->
+                    if (saver == SAVER_OFF) print("saver: it is off. Pick one with saver <name>", Style.ERR)
+                    else cue(Cue.SAVER)
+                word in SAVER_CHOICES -> {
+                    saver = word
+                    store.put(KEY_SAVER, word)
+                    if (word == SAVER_OFF) print("saver off")
+                    else row(Span("saver $word  "), Span("see it now", Style.APP, "saver show"))
+                }
+                else -> {
+                    print("saver: no screensaver '${args[0]}'. Try one of", Style.ERR)
+                    choices(SAVER_CHOICES, saver, "saver")
+                }
+            }
+        }
+        def("fx", "system", "fx [on|off]", "animations") { args, _ ->
+            when (val word = args.firstOrNull()?.lowercase()) {
+                null -> print("animations are ${if (motion) "on" else "off"}")
+                "on", "off" -> {
+                    motion = word == "on"
+                    store.put(KEY_FX, word)
+                    print("animations $word")
+                }
+                else -> print("fx: expected on or off", Style.ERR)
             }
         }
         def("alias", "system", "alias [n=cmd]", "shortcuts") { _, rest ->
@@ -710,9 +1017,12 @@ class Shell(
                 print("$key is already on", Style.DIM)
             }
         }
-        def("clear", "system", "clear", "clear the screen") { _, _ -> lines = emptyList() }
+        def("clear", "system", "clear", "clear the screen") { _, _ -> page(emptyList()) }
         def("lock", "system", "lock", "lock the phone") { _, _ ->
-            if (vault.isSet) showLock() else print("lock: set a password first with passwd", Style.ERR)
+            if (vault.isSet) {
+                cue(Cue.POWER_OFF)
+                showLock()
+            } else print("lock: set a password first with passwd", Style.ERR)
         }
         def("help", "system", "help", "this list") { _, _ ->
             for (group in listOf("apps", "phone", "system")) {
@@ -735,6 +1045,35 @@ class Shell(
             return -2
         }
         return n
+    }
+
+    /** Prints a month the way `cal` does, in the week order of the phone's region, with today marked. */
+    private fun calendar(month: Int, year: Int, today: Calendar) {
+        val first = Calendar.getInstance().apply {
+            clear()
+            set(year, month, 1)
+        }
+        val weekStart = first.firstDayOfWeek
+        val title = "${Fmt.MONTH_NAMES[month]} $year"
+        print(" ".repeat(((20 - title.length) / 2).coerceAtLeast(0)) + title)
+        val names = listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")
+        print((0 until 7).joinToString(" ") { names[(weekStart - 1 + it) % 7] }, Style.DIM)
+
+        val offset = (first.get(Calendar.DAY_OF_WEEK) - weekStart + 7) % 7
+        val isThisMonth = today.get(Calendar.YEAR) == year && today.get(Calendar.MONTH) == month
+        var spans = ArrayList<Span>()
+        if (offset > 0) spans += Span("   ".repeat(offset))
+        for (day in 1..first.getActualMaximum(Calendar.DAY_OF_MONTH)) {
+            val column = (offset + day - 1) % 7
+            if (column == 0 && day > 1) {
+                add(TextLine(spans))
+                spans = ArrayList()
+            }
+            if (column > 0 && day > 1) spans += Span(" ")
+            val marked = isThisMonth && day == today.get(Calendar.DAY_OF_MONTH)
+            spans += Span(day.toString().padStart(2), if (marked) Style.MARK else Style.NORMAL)
+        }
+        add(TextLine(spans))
     }
 
     private fun dial(number: String, label: String) {

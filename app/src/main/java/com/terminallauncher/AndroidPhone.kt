@@ -2,8 +2,10 @@ package com.terminallauncher
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.Notification
+import android.app.usage.StorageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -13,23 +15,37 @@ import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.MediaMetadata
+import android.media.session.MediaController
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
+import android.os.SystemClock
 import android.os.UserHandle
+import android.os.storage.StorageManager
 import android.provider.ContactsContract
 import android.provider.Settings
+import android.service.notification.StatusBarNotification
+import android.view.WindowManager
 import androidx.core.app.NotificationManagerCompat
 import com.terminallauncher.shell.AppEntry
 import com.terminallauncher.shell.Battery
 import com.terminallauncher.shell.Contact
+import com.terminallauncher.shell.LAUNCH_MS
+import com.terminallauncher.shell.MediaKey
 import com.terminallauncher.shell.Notif
 import com.terminallauncher.shell.Panel
 import com.terminallauncher.shell.Phone
 import com.terminallauncher.shell.SetupItem
+import com.terminallauncher.shell.SystemInfo
+import com.terminallauncher.shell.Track
 import java.util.Locale
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
@@ -42,6 +58,12 @@ class AndroidPhone(private val ctx: Context) : Phone {
     /** Called when something the status line shows has changed. */
     var onChange: () -> Unit = {}
 
+    /** Whether animations are on. While they are, a launch waits for its transition to play. */
+    var animate: () -> Boolean = { false }
+
+    /** Called with a message when something already reported as started fails after all. */
+    var onError: (String) -> Unit = {}
+
     private class Launchable(val entry: AppEntry, val component: ComponentName, val user: UserHandle)
 
     private val launcher = ctx.getSystemService(LauncherApps::class.java)
@@ -49,6 +71,9 @@ class AndroidPhone(private val ctx: Context) : Phone {
     private val audio = ctx.getSystemService(AudioManager::class.java)
     private val camera = ctx.getSystemService(CameraManager::class.java)
     private val keyguard = ctx.getSystemService(KeyguardManager::class.java)
+    private val sessions = ctx.getSystemService(MediaSessionManager::class.java)
+    private val listener = ComponentName(ctx, NotifService::class.java)
+    private val main = Handler(Looper.getMainLooper())
 
     @Volatile
     private var appCache: List<Launchable>? = null
@@ -137,12 +162,24 @@ class AndroidPhone(private val ctx: Context) : Phone {
 
     override fun launch(app: AppEntry): Boolean {
         val target = find(app) ?: return false
-        return try {
-            launcher.startMainActivity(target.component, target.user, null, null)
-            true
-        } catch (e: Exception) {
-            false
+        if (!animate()) {
+            return try {
+                launcher.startMainActivity(target.component, target.user, null, null)
+                true
+            } catch (e: Exception) {
+                false
+            }
         }
+        // The terminal grows the launch line until it fills the screen. The app then fades in over it.
+        val fadeIn = ActivityOptions.makeCustomAnimation(ctx, android.R.anim.fade_in, android.R.anim.fade_out).toBundle()
+        main.postDelayed({
+            try {
+                launcher.startMainActivity(target.component, target.user, null, fadeIn)
+            } catch (e: Exception) {
+                onError("open: could not start ${app.name}")
+            }
+        }, LAUNCH_MS)
+        return true
     }
 
     override fun appInfo(app: AppEntry): Boolean {
@@ -188,6 +225,34 @@ class AndroidPhone(private val ctx: Context) : Phone {
                     ageMinutes = ((now - n.postTime) / 60_000).coerceAtLeast(0),
                 )
             }
+    }
+
+    /** The text last shown for each notification, so one that is posted again unchanged stays quiet. */
+    private val heard = HashMap<String, String>()
+
+    /**
+     * What to print for a notification that was just posted, or null if it is not news: a progress
+     * bar, a media player, something that cannot be dismissed, or a repeat of what was already shown.
+     */
+    fun arrival(sbn: StatusBarNotification): Notif? {
+        val n = sbn.notification ?: return null
+        if (sbn.packageName == ctx.packageName || !sbn.isClearable) return null
+        val quiet = Notification.FLAG_GROUP_SUMMARY or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE
+        if (n.flags and quiet != 0) return null
+        if (n.category in setOf(Notification.CATEGORY_TRANSPORT, Notification.CATEGORY_PROGRESS, Notification.CATEGORY_SERVICE)) return null
+        val extras = n.extras
+        if (extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0 || extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)) return null
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        if (title.isBlank() && text.isBlank()) return null
+        if (heard.size > 300) heard.clear()
+        val shown = title + "\n" + text
+        if (heard.put(sbn.key, shown) == shown) return null
+        return Notif(appName(sbn.packageName), title, text, 0)
+    }
+
+    fun dismissed(sbn: StatusBarNotification) {
+        heard.remove(sbn.key)
     }
 
     override fun clearNotifications(): Int {
@@ -302,6 +367,87 @@ class AndroidPhone(private val ctx: Context) : Phone {
         ctx.applicationContext.getSystemService(WifiManager::class.java).isWifiEnabled
     } catch (e: Exception) {
         false
+    }
+
+    override fun system(): SystemInfo {
+        val size = try {
+            val windows = ctx.getSystemService(WindowManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                windows.maximumWindowMetrics.bounds.let { minOf(it.width(), it.height()) to maxOf(it.width(), it.height()) }
+            } else {
+                val point = android.graphics.Point()
+                @Suppress("DEPRECATION")
+                windows.defaultDisplay.getRealSize(point)
+                minOf(point.x, point.y) to maxOf(point.x, point.y)
+            }
+        } catch (e: Exception) {
+            ctx.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) to maxOf(it.widthPixels, it.heightPixels) }
+        }
+        // The storage service reports the size on the box (128 GB); the file system only what is left of it.
+        val (total, free) = try {
+            val stats = ctx.getSystemService(StorageStatsManager::class.java)
+            stats.getTotalBytes(StorageManager.UUID_DEFAULT) to stats.getFreeBytes(StorageManager.UUID_DEFAULT)
+        } catch (e: Exception) {
+            StatFs(Environment.getDataDirectory().path).let { it.totalBytes to it.availableBytes }
+        }
+        val gb = 1_000_000_000.0
+        return SystemInfo(
+            os = "android ${Build.VERSION.RELEASE}",
+            device = clean(Build.MODEL.orEmpty()).ifEmpty { "phone" },
+            display = "${size.first}x${size.second}",
+            uptimeMinutes = SystemClock.elapsedRealtime() / 60_000,
+            diskUsedGb = ((total - free) / gb).roundToInt().toLong(),
+            diskTotalGb = (total / gb).roundToInt().toLong(),
+        )
+    }
+
+    /** false when the phone is set to show no animations at all. */
+    fun systemAnimations(): Boolean =
+        Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+
+    /* ---------------- the media player ---------------- */
+
+    /** The player that is playing, or failing that the first one with a track loaded. */
+    private fun player(): MediaController? {
+        if (!notifAccess()) return null
+        val all = try {
+            sessions.getActiveSessions(listener)
+        } catch (e: Exception) {
+            return null
+        }
+        return all.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING && it.metadata != null }
+            ?: all.firstOrNull { it.metadata != null }
+    }
+
+    override fun nowPlaying(): Track? {
+        val player = player() ?: return null
+        val meta = player.metadata ?: return null
+        val title = (meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE))
+            ?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val artist = (meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST))
+            .orEmpty().trim()
+        val duration = meta.getLong(MediaMetadata.METADATA_KEY_DURATION).coerceAtLeast(0)
+        val state = player.playbackState
+        val playing = state?.state == PlaybackState.STATE_PLAYING
+        var position = state?.position ?: 0
+        // the player reports where it was at some moment; it has moved on since
+        if (playing && state != null) {
+            position += ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
+        }
+        position = position.coerceAtLeast(0)
+        if (duration > 0) position = position.coerceAtMost(duration)
+        return Track(title, artist, playing, position, duration)
+    }
+
+    override fun media(key: MediaKey): Boolean {
+        val controls = player()?.transportControls ?: return false
+        when (key) {
+            MediaKey.PREVIOUS -> controls.skipToPrevious()
+            MediaKey.PLAY -> controls.play()
+            MediaKey.PAUSE -> controls.pause()
+            MediaKey.NEXT -> controls.skipToNext()
+        }
+        return true
     }
 
     override fun openPanel(panel: Panel): Boolean = when (panel) {

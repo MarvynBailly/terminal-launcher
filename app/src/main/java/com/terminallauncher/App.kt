@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.service.notification.StatusBarNotification
 import androidx.core.content.ContextCompat
 import com.terminallauncher.shell.Shell
 
@@ -38,16 +40,46 @@ class App : Application() {
         phone.onChange = ::redraw
         shell = Shell(phone, PrefsStore(prefs), PrefsVault(prefs))
         shell.onChange = ::redraw
+        phone.animate = ::animating
+        phone.onError = { message -> onMain { shell.info(message, error = true) } }
         shell.start()
 
-        val screenOff = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) = onScreenOff()
+        val screen = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == Intent.ACTION_SCREEN_OFF) onScreenOff() else shell.wake()
+            }
         }
-        ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF).apply { addAction(Intent.ACTION_SCREEN_ON) }
+        ContextCompat.registerReceiver(this, screen, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
-    fun redraw() {
-        if (Looper.myLooper() == Looper.getMainLooper()) tellActivity() else main.post(::tellActivity)
+    /** Animations play unless `fx off` was typed or the phone itself is set to show none. */
+    fun animating(): Boolean = shell.motion && phone.systemAnimations()
+
+    /**
+     * The activity came to the front. If the screen is on, the terminal should be awake too, even if
+     * the screen-on broadcast has not arrived yet.
+     */
+    fun wakeIfScreenOn() {
+        if (getSystemService(PowerManager::class.java).isInteractive) shell.wake()
+    }
+
+    /** A notification was posted. It is printed in the terminal if the terminal is what is on screen. */
+    fun posted(sbn: StatusBarNotification) = onMain {
+        val news = phone.arrival(sbn)
+        if (news != null && onRedraw != null) shell.notify(news)
+        tellActivity()
+    }
+
+    fun removed(sbn: StatusBarNotification) = onMain {
+        phone.dismissed(sbn)
+        tellActivity()
+    }
+
+    fun redraw() = onMain(::tellActivity)
+
+    private fun onMain(work: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) work() else main.post(work)
     }
 
     private fun tellActivity() {

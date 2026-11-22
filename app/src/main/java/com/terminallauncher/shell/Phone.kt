@@ -6,6 +6,11 @@ package com.terminallauncher.shell
  */
 interface Phone {
     fun apps(): List<AppEntry>
+
+    /**
+     * false if the app is gone. true means it is on its way: the phone may hold the start back for
+     * [LAUNCH_MS] so the launch transition has time to play.
+     */
     fun launch(app: AppEntry): Boolean
     fun appInfo(app: AppEntry): Boolean
 
@@ -35,6 +40,16 @@ interface Phone {
     fun battery(): Battery
     fun wifiOn(): Boolean
     fun openPanel(panel: Panel): Boolean
+    fun system(): SystemInfo
+
+    /**
+     * The track the phone's media player is on, playing or paused. null when there is none, and
+     * always null until the user grants notification access, which is how Android gates this.
+     */
+    fun nowPlaying(): Track?
+
+    /** false if there is no player to take the key. */
+    fun media(key: MediaKey): Boolean
 
     fun setup(): List<SetupItem>
 

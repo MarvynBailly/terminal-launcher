@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
                 window.navigationBarColor = palette.bg.toArgb()
                 WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = palette.light
             }
-            TerminalScreen(app.shell, app.phone, rev, wake, onScreen)
+            TerminalScreen(app.shell, app.phone, rev, wake, onScreen, motion = app.animating())
         }
     }
 
@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
         app.phone.activity = this
         app.onRedraw = { rev++ }
         onScreen = true
+        app.wakeIfScreenOn()
         syncLockScreen()
         rev++                     // the session may have locked or printed while we were away
     }

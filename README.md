@@ -30,8 +30,13 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `torch [on\|off]` | flashlight |
 | `wifi`, `bt` | open Android's Wi-Fi and Bluetooth panels |
 | `vol [0-100]`, `bright [0-100]` | media volume and screen brightness |
+| `np [pause\|play\|next\|prev]` | what is playing, with progress and controls |
 | `battery`, `date` | status |
-| `theme [name]` | `default`, `green`, `amber` or `eink` |
+| `cal [month] [year]` | a month calendar with today marked |
+| `fetch` | a system card: Android version, device, uptime, apps, battery, storage |
+| `theme [name]` | `default`, `green`, `amber`, `eink`, `nord`, `gruvbox`, `dracula`, `solarized`, `synthwave` or `paper` |
+| `saver [name]` | the lock screen's screensaver: `rain`, `stars`, `life`, `clock`, `shuffle` or `off`; `saver show` previews it |
+| `fx [on\|off]` | turn the animations on or off |
 | `alias [name=cmd]` | define shortcuts (`ll` is `ls -l`) |
 | `history` | recent commands |
 | `passwd [-d]` | set, change or remove the password |
@@ -39,7 +44,27 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `lock`, `clear`, `help` | lock the terminal, clear the screen, list commands |
 
 The chips above the keyboard complete what you are typing, and `↑` recalls earlier commands.
-App names in `ls` output can be tapped.
+App names in `ls` output can be tapped. A mistyped command offers the nearest match; tapping it
+puts it at the prompt.
+
+## Motion
+
+The terminal behaves like an old machine:
+
+- **Waking** opens the screen from a bright line and prints a short boot log above the password
+  prompt. `lock` collapses the screen to a dot.
+- **A right password** resolves "access granted" out of noise while the clock breaks apart, then
+  the login summary prints: how far through the day, week and year you are, what is waiting, and a tip.
+- **Output** prints line by line, `ls` fills in as a wave, and opening an app grows its line until
+  it fills the screen.
+- **Notifications** that arrive while the terminal is open type themselves above the prompt, and
+  the status line shows the track that is playing. Both need `setup notifs`.
+- **Screensavers** start on the lock screen after 30 seconds without a touch, only while the phone
+  is charging. They keep the screen on for up to 10 minutes, then let it sleep. Any touch ends one.
+
+None of it blocks typing: what you type while something is still printing is kept. `fx off` turns
+all of it off, and so does Android's own "remove animations" setting. `saver off` turns the
+screensaver off.
 
 ## The lock
 
@@ -73,7 +98,9 @@ Requires JDK 17 and the Android SDK (platform 34).
 
 The command interpreter in `app/src/main/java/com/terminallauncher/shell/` is plain Kotlin and
 talks to the phone through the `Phone` interface, which `AndroidPhone.kt` implements. The UI is
-Jetpack Compose (`ui/TerminalScreen.kt`). `demo/index.html` is the original browser mock-up.
+Jetpack Compose: `ui/TerminalScreen.kt` is the screen, `ui/Rows.kt` draws each kind of output line,
+`ui/Effects.kt` holds the timing of the animations and `ui/Savers.kt` the screensavers.
+`demo/index.html` is the original browser mock-up.
 
 ## Release
 
