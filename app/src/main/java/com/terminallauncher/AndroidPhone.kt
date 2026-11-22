@@ -2,6 +2,7 @@ package com.terminallauncher
 
 import android.Manifest
 import android.app.Activity
+import android.app.KeyguardManager
 import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
@@ -47,6 +48,7 @@ class AndroidPhone(private val ctx: Context) : Phone {
     private val pm = ctx.packageManager
     private val audio = ctx.getSystemService(AudioManager::class.java)
     private val camera = ctx.getSystemService(CameraManager::class.java)
+    private val keyguard = ctx.getSystemService(KeyguardManager::class.java)
 
     @Volatile
     private var appCache: List<Launchable>? = null
@@ -342,5 +344,24 @@ class AndroidPhone(private val ctx: Context) : Phone {
         val host = activity ?: return start(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, self))
         host.requestPermissions(arrayOf(permission), 0)
         return true
+    }
+
+    /* ---------------- Android's own lock screen ---------------- */
+
+    override fun deviceLocked(): Boolean = keyguard.isKeyguardLocked
+
+    override fun unlockDevice(done: (Boolean) -> Unit) {
+        val host = activity
+        if (host == null) {
+            done(!deviceLocked())
+            return
+        }
+        keyguard.requestDismissKeyguard(host, object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() = done(true)
+            override fun onDismissCancelled() = done(false)
+
+            // Android reports an error when there was nothing to dismiss, which is also a way of being unlocked.
+            override fun onDismissError() = done(!deviceLocked())
+        })
     }
 }

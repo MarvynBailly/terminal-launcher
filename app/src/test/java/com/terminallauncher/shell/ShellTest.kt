@@ -54,6 +54,12 @@ private class FakePhone : Phone {
     override fun openPanel(panel: Panel): Boolean { panels += panel; return true }
     override fun setup() = listOf(SetupItem("home", "default home app", true), SetupItem("notifs", "read notifications", notifAccess))
     override fun fix(key: String): Boolean { fixed += key; return key != "home" }
+
+    /** Android's own lock screen, and the answer it is still waiting to give to an unlock request. */
+    var androidLocked = false
+    var unlockAnswer: ((Boolean) -> Unit)? = null
+    override fun deviceLocked() = androidLocked
+    override fun unlockDevice(done: (Boolean) -> Unit) { unlockAnswer = done }
 }
 
 private class FakeStore : Store {
@@ -152,6 +158,68 @@ class ShellTest {
         s.run("ls")                       // typed at the password prompt: just a wrong password
         assertTrue(s.locked)
         assertTrue(phone.launched.isEmpty())
+    }
+
+    /* ---------- on top of Android's lock screen ---------- */
+
+    private fun waitingForAndroid(): Shell {
+        vault.password = "pw"
+        phone.androidLocked = true
+        return shell().run("pw")
+    }
+
+    @Test fun rightPasswordStillWaitsForAndroidsUnlock() {
+        val s = waitingForAndroid()
+        assertTrue("the terminal must not open on a locked phone", s.locked)
+        assertNull(s.prompt)
+        assertTrue(s.text().contains("unlock the phone"))
+        assertNotNull(phone.unlockAnswer)
+        s.run("ls")
+        time += 5_000
+        s.tick()
+        assertTrue(s.locked)
+        assertNull("still waiting, not back at the password", s.prompt)
+
+        phone.androidLocked = false
+        phone.unlockAnswer!!(true)
+        assertFalse(s.locked)
+        assertEquals(PromptKind.SHELL, s.prompt!!.kind)
+        assertFalse(s.text().contains("unlock the phone"))
+    }
+
+    @Test fun wrongPasswordNeverAsksAndroid() {
+        vault.password = "pw"
+        phone.androidLocked = true
+        val s = shell().run("nope")
+        assertNull(phone.unlockAnswer)
+        assertEquals(PromptKind.LOGIN, s.prompt!!.kind)
+    }
+
+    @Test fun backingOutOfAndroidsUnlockReturnsToThePassword() {
+        val s = waitingForAndroid()
+        phone.unlockAnswer!!(false)
+        assertTrue(s.locked)
+        assertEquals(PromptKind.LOGIN, s.prompt!!.kind)
+        assertTrue(s.text().contains("Phone still locked"))
+    }
+
+    @Test fun androidUnlockedAnotherWayLetsTheLoginThrough() {
+        val s = waitingForAndroid()
+        phone.androidLocked = false
+        s.tick()
+        assertFalse(s.locked)
+        s.run("lock")
+        phone.unlockAnswer!!(false)             // the old request answering late must not matter
+        assertEquals(PromptKind.LOGIN, s.prompt!!.kind)
+        assertFalse(s.text().contains("Phone still locked"))
+    }
+
+    @Test fun screenOffWhileWaitingStartsOverAtThePassword() {
+        val s = waitingForAndroid()
+        assertTrue(s.lock())
+        assertEquals(PromptKind.LOGIN, s.prompt!!.kind)
+        phone.unlockAnswer!!(true)              // a late answer cannot open a terminal that locked again
+        assertTrue(s.locked)
     }
 
     @Test fun threeWrongPasswordsLockOutThenRecover() {

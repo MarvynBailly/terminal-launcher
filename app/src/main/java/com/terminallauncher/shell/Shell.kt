@@ -59,6 +59,10 @@ class Shell(
     private var pending: ((String) -> Unit)? = null
     private var fails = 0
 
+    /** The password was right and Android is asking for its own unlock. See [awaitPhone]. */
+    private var waitingForPhone = false
+    private var unlockAttempt = 0
+
     init {
         val saved = store.get(KEY_ALIASES)
         if (saved == null) aliases["ll"] = "ls -l"
@@ -129,7 +133,8 @@ class Shell(
      */
     fun lock(): Boolean {
         if (!vault.isSet) return false
-        if (!locked) {
+        // A login that was still waiting for Android's unlock starts over from the password.
+        if (!locked || waitingForPhone) {
             showLock()
             onChange()
         }
@@ -138,7 +143,14 @@ class Shell(
 
     /** Call about once a second while visible: ends a lockout when its time is up. */
     fun tick() {
-        if (locked && prompt == null && lines.none { it is Lockout && it.until > now() }) {
+        if (!locked) return
+        if (waitingForPhone) {
+            // Android was unlocked some other way while it was asking, such as from a notification.
+            if (!phone.deviceLocked()) {
+                openHome()
+                onChange()
+            }
+        } else if (prompt == null && lines.none { it is Lockout && it.until > now() }) {
             showLock()
             onChange()
         }
@@ -240,6 +252,7 @@ class Shell(
 
     private fun showLock(note: String? = null) {
         locked = true
+        waitingForPhone = false
         pending = null
         lines = listOfNotNull(LockHeader, note?.let { TextLine(listOf(Span(it, Style.ERR))) })
         prompt = LOGIN_PROMPT
@@ -248,7 +261,7 @@ class Shell(
     private fun login(password: String) {
         if (vault.matches(password)) {
             fails = 0
-            openHome()
+            if (phone.deviceLocked()) awaitPhone() else openHome()
             return
         }
         fails++
@@ -263,8 +276,28 @@ class Shell(
         prompt = null
     }
 
+    /**
+     * The password was right, but the terminal is being shown on top of Android's lock screen and that
+     * lock is still up. The terminal stays locked until Android reports its own unlock, so none of its
+     * commands can be used on a phone that is still locked.
+     */
+    private fun awaitPhone() {
+        val attempt = ++unlockAttempt
+        waitingForPhone = true
+        lines = listOf(LockHeader, TextLine(listOf(Span("unlock the phone to continue", Style.DIM))))
+        prompt = null
+        phone.unlockDevice { unlocked ->
+            // Out of date if the terminal was locked again, or let in by tick(), while Android was asking.
+            if (waitingForPhone && attempt == unlockAttempt) {
+                if (unlocked) openHome() else showLock("Phone still locked")
+                onChange()
+            }
+        }
+    }
+
     private fun openHome() {
         locked = false
+        waitingForPhone = false
         pending = null
         prompt = SHELL_PROMPT
         lines = emptyList()

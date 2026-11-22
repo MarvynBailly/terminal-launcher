@@ -28,8 +28,14 @@ class MainActivity : ComponentActivity() {
 
     private val app get() = application as App
 
+    /** What Android was last told about showing over its lock screen; null before the first time. */
+    private var overLockScreen: Boolean? = null
+    private val lockSync: () -> Unit = { syncLockScreen() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        app.onLockChange = lockSync
+        syncLockScreen()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -54,7 +60,32 @@ class MainActivity : ComponentActivity() {
         app.phone.activity = this
         app.onRedraw = { rev++ }
         onScreen = true
+        syncLockScreen()
         rev++                     // the session may have locked or printed while we were away
+    }
+
+    override fun onDestroy() {
+        if (app.onLockChange === lockSync) app.onLockChange = null
+        super.onDestroy()
+    }
+
+    /**
+     * While the terminal is locked it may show on top of Android's lock screen, so its password page is
+     * the first thing on screen when the phone wakes. Android's lock is still there underneath: a right
+     * password is followed by Android's own unlock (see Shell.awaitPhone). Once the terminal is open it
+     * goes back behind Android's lock like any other app, so it can never be used on a locked phone.
+     */
+    private fun syncLockScreen() {
+        val over = app.shell.locked
+        if (over == overLockScreen) return
+        overLockScreen = over
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(over)
+        } else if (over) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        }
     }
 
     override fun onResume() {

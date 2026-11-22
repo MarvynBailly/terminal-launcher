@@ -23,6 +23,12 @@ class App : Application() {
     /** Set by the activity while it is on screen. */
     var onRedraw: (() -> Unit)? = null
 
+    /**
+     * Set by the activity for as long as it exists, on screen or not. It has to hear about the terminal
+     * locking while the screen is off, to be in place over Android's lock screen before the phone wakes.
+     */
+    var onLockChange: (() -> Unit)? = null
+
     private val main = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
@@ -41,7 +47,12 @@ class App : Application() {
     }
 
     fun redraw() {
-        if (Looper.myLooper() == Looper.getMainLooper()) onRedraw?.invoke() else main.post { onRedraw?.invoke() }
+        if (Looper.myLooper() == Looper.getMainLooper()) tellActivity() else main.post(::tellActivity)
+    }
+
+    private fun tellActivity() {
+        onLockChange?.invoke()
+        onRedraw?.invoke()
     }
 
     private fun onScreenOff() {

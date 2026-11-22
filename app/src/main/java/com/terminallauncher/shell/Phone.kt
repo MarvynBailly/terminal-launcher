@@ -40,6 +40,15 @@ interface Phone {
 
     /** Opens the settings page or permission dialog for a setup item. false if there is nothing to do. */
     fun fix(key: String): Boolean
+
+    /** True while Android's own lock screen is still up, whether or not the terminal is drawn over it. */
+    fun deviceLocked(): Boolean
+
+    /**
+     * Takes the user through Android's own unlock: fingerprint, PIN, or nothing at all if the lock
+     * screen is only a swipe. Reports true once the phone is unlocked, false if the user backed out.
+     */
+    fun unlockDevice(done: (Boolean) -> Unit)
 }
 
 interface Store {

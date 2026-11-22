@@ -11,8 +11,6 @@ You log in with a password, then type commands to use the phone.
 ## Install
 
 **With Obtainium:** add an app with the source URL `https://github.com/MarvynBailly/terminal-launcher`.
-While this repository is private, Obtainium needs a GitHub token that can read it
-(Obtainium settings, then "GitHub personal access token").
 
 **By hand:** download the APK from [Releases](../../releases) and open it on the phone.
 
@@ -48,9 +46,20 @@ App names in `ls` output can be tapped.
 There is no password until you run `passwd`. After that the terminal locks on `lock`, when the
 screen turns off, and when the phone restarts. Three wrong passwords start a timed lockout.
 
-This is a launcher-level lock, not a security boundary: Android does not let an app replace its
-own lock screen, and the notification shade and recent apps stay reachable while the terminal is
-locked. Keep Android's screen lock on if the phone needs protecting. If you forget the password,
+While it is locked, the terminal shows on top of Android's own lock screen, so its password page
+is the first thing on screen when the phone wakes. Android's lock is still underneath:
+
+- **Android lock set to PIN, pattern or fingerprint:** after the right terminal password, Android
+  asks for its own unlock, and only then does the terminal open. Use the fingerprint sensor when
+  Android asks, not before.
+- **Android lock set to Swipe or None:** the terminal password alone opens the phone.
+
+After a restart Android's lock comes first, because no app can run until the phone has been
+unlocked once.
+
+The terminal password is not a security boundary by itself. Android does not let an app replace
+its lock screen, and the notification shade stays reachable while the terminal is locked. Keep
+Android's screen lock on if the phone needs protecting. If you forget the terminal password,
 clear the app's data in Android settings.
 
 ## Build
