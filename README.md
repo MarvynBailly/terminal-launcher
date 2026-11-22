@@ -37,6 +37,9 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `theme [name]` | `default`, `green`, `amber`, `eink`, `nord`, `gruvbox`, `dracula`, `solarized`, `synthwave` or `paper` |
 | `saver [name]` | the lock screen's screensaver: `rain`, `stars`, `life`, `clock`, `shuffle` or `off`; `saver show` previews it |
 | `fx [on\|off]` | turn the animations on or off |
+| `ssh [user@]host [-p port]` | log in to another computer; `ssh` alone lists the ones you have used |
+| `ssh key`, `ssh-copy-id <host>` | show this phone's SSH key, or add it to a computer so it stops asking for a password |
+| `ssh forget <host>` | forget a computer's saved fingerprint |
 | `alias [name=cmd]` | define shortcuts (`ll` is `ls -l`) |
 | `history` | recent commands |
 | `passwd [-d]` | set, change or remove the password |
@@ -65,6 +68,45 @@ The terminal behaves like an old machine:
 None of it blocks typing: what you type while something is still printing is kept. `fx off` turns
 all of it off, and so does Android's own "remove animations" setting. `saver off` turns the
 screensaver off.
+
+## SSH
+
+`ssh alex@desktop` logs in to another computer and hands it the prompt. Each line you type runs
+there and what it prints appears in the terminal, until `exit` or the `disconnect` chip brings the
+launcher's `$` back. With Tailscale or WireGuard running on the phone, a computer on that network
+is reached by the name or address it has there.
+
+This is a line terminal, not a full one:
+
+- **Works:** anything that prints lines, such as `ls`, `cd`, `git`, `tail`, `systemctl` or
+  `docker ps`, and anything that asks a question. A password prompt, such as the one `sudo` shows,
+  is typed unseen.
+- **Does not work:** programs that draw the whole screen, such as `vim`, `htop`, `top` and `tmux`.
+  A pager like `less` still pages: `q` and Enter leaves it.
+- **Chips:** `^C` stops the running command, `^D` ends input, `disconnect` hangs up, and `↑`
+  recalls what you typed in this session.
+
+**Logging in.** The phone makes its own key the first time one is needed. `ssh key` shows the
+public half, and `ssh-copy-id user@host` logs in once with the password and adds the key there,
+after which no password is asked. Without the key, the password is asked for at a hidden prompt.
+
+**Knowing the computer.** The first connection shows the computer's key fingerprint and asks whether
+to trust it. From then on the fingerprint is checked without a word, and a computer that shows a
+different one is refused with a warning. `ssh forget <host>` drops a saved fingerprint, for a
+computer that was reinstalled.
+
+**Windows computers** are not asked for a terminal, because the one they give redraws the screen
+instead of printing lines. Commands work the same, but there is no `^C`: `disconnect` is how to
+stop one. `ssh-copy-id` leaves them alone too, so the key has to be added there by hand.
+
+**What protects it.** The private key stays on the phone, encrypted with a key that Android's
+keystore holds and will not give out. If a launcher password is set, `ssh` asks for it again unless
+it was typed in the last five minutes. A session ends when the screen turns off. `ssh` is the only
+part of the launcher that uses the network.
+
+A computer set up to offer only an Ed25519 host key needs a phone whose Android can check one.
+Android 14 cannot, and `ssh` then says the two have no method in common. Computers set up the
+usual way offer other kinds as well.
 
 ## The lock
 
@@ -100,6 +142,8 @@ The command interpreter in `app/src/main/java/com/terminallauncher/shell/` is pl
 talks to the phone through the `Phone` interface, which `AndroidPhone.kt` implements. The UI is
 Jetpack Compose: `ui/TerminalScreen.kt` is the screen, `ui/Rows.kt` draws each kind of output line,
 `ui/Effects.kt` holds the timing of the animations and `ui/Savers.kt` the screensavers.
+SSH follows the same split: `shell/Remote.kt` is what the shell asks for and how a remote shell's
+output becomes lines, and `AndroidSsh.kt` provides it with the JSch library.
 `demo/index.html` is the original browser mock-up.
 
 ## Release
@@ -123,3 +167,5 @@ produces the same signed build locally.
 ## Credits
 
 The typeface is IBM Plex Mono, under the SIL Open Font License (`licenses/IBM-Plex-Mono-OFL.txt`).
+SSH connections are made with [JSch](https://github.com/mwiede/jsch), under BSD-style licenses
+(`licenses/JSch-LICENSE.txt`).

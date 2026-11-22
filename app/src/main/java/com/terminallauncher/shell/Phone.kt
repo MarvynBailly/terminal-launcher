@@ -51,6 +51,9 @@ interface Phone {
     /** false if there is no player to take the key. */
     fun media(key: MediaKey): Boolean
 
+    /** Puts [text] on the clipboard. */
+    fun copy(text: String): Boolean
+
     fun setup(): List<SetupItem>
 
     /** Opens the settings page or permission dialog for a setup item. false if there is nothing to do. */

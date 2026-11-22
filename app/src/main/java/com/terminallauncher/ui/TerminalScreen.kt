@@ -118,6 +118,9 @@ private const val CUE_FRESH_MS = 2000L
 private const val SAVER_AFTER_MS = 30_000L
 private const val SAVER_LIMIT_MS = 10 * 60_000L
 
+/** A prompt for command lines, the launcher's own or another computer's, as opposed to one for an answer. */
+private fun takesCommands(prompt: Prompt?) = prompt?.kind == PromptKind.SHELL || prompt?.kind == PromptKind.REMOTE
+
 /** The rows that were on screen at the last draw, for a scene that needs the page from before it. */
 private class PageBefore {
     var rows: List<Row> = emptyList()
@@ -203,7 +206,7 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
     }
     fun recall(direction: Int) {                 // 1 = older, -1 = newer
         val past = shell.history
-        if (past.isEmpty() || prompt?.kind != PromptKind.SHELL) return
+        if (past.isEmpty() || !takesCommands(prompt)) return
         if (histIdx == -1) {
             if (direction < 0) return
             draft = field.text
@@ -354,7 +357,10 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                     val allRows = remember(lines, ids, columns) { buildRows(lines, ids, columns) }
                     val rows = remember(allRows, frontier) { allRows.filter { it.id < frontier } }
                     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
-                    SideEffect { pageBefore.rows = rows }
+                    SideEffect {
+                        pageBefore.rows = rows
+                        shell.columns = columns
+                    }
 
                     val env = RowEnv(
                         palette = palette,
@@ -370,42 +376,44 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                         onLaunch = { if (motion) launch = it },
                     )
 
-                    // keep the prompt in view when output arrives or the keyboard moves
-                    LaunchedEffect(rev, rows.size, imeBottom) { list.scrollToItem(rows.size) }
+                    // keep the end of the output in view when more arrives or the keyboard moves
+                    LaunchedEffect(rev, rows.size, imeBottom) { if (rows.isNotEmpty()) list.scrollToItem(rows.size - 1) }
 
-                    LazyColumn(Modifier.fillMaxSize(), state = list) {
-                        items(rows.size, key = { rows[it].key }) { i -> RowView(rows[i], env) }
-                        // The key keeps this one composition, and with it the text field's focus and the
-                        // keyboard, alive while output is added above it.
-                        item(key = "prompt") {
-                            PromptLine(
-                                prompt = prompt,
-                                hidden = printing,
-                                field = field,
-                                palette = palette,
-                                base = base,
-                                focus = focus,
-                                onChange = { v ->
-                                    touched()
-                                    if (prompt != null) {
-                                        if ('\n' in v.text) submit(v.text.replace("\n", ""))
-                                        else {
-                                            if (v.text != field.text) histIdx = -1
-                                            field = v
-                                        }
-                                    }
-                                },
-                                onSubmit = { submit(field.text) },
-                                onTab = { shell.complete(field.text)?.let { setField(it) } },
-                                onRecall = ::recall,
-                                onCancel = {
-                                    shell.cancel(field.text)
-                                    setField("")
-                                    histIdx = -1
-                                },
-                                onClear = { shell.clear() },
-                            )
+                    // The prompt sits under the list, not in it. A list rebuilds its items when most of
+                    // them change at once, as on `clear` or a burst of remote output, and a rebuilt text
+                    // field loses its focus and the keyboard. Out here it is one composition for good.
+                    // The list is only as tall as its rows, so the prompt still follows the last line.
+                    Column(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth(), state = list) {
+                            items(rows.size, key = { rows[it].key }) { i -> RowView(rows[i], env) }
                         }
+                        PromptLine(
+                            prompt = prompt,
+                            hidden = printing,
+                            field = field,
+                            palette = palette,
+                            base = base,
+                            focus = focus,
+                            onChange = { v ->
+                                touched()
+                                if (prompt != null) {
+                                    if ('\n' in v.text) submit(v.text.replace("\n", ""))
+                                    else {
+                                        if (v.text != field.text) histIdx = -1
+                                        field = v
+                                    }
+                                }
+                            },
+                            onSubmit = { submit(field.text) },
+                            onTab = { shell.complete(field.text)?.let { setField(it) } },
+                            onRecall = ::recall,
+                            onCancel = {
+                                shell.cancel(field.text)
+                                setField("")
+                                histIdx = -1
+                            },
+                            onClear = { shell.clear() },
+                        )
                     }
 
                     if (playing != null && playing.showsBefore && playing.before.isNotEmpty()) {
@@ -432,12 +440,17 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                 ChipRow(
                     shell = shell,
                     input = field.text,
+                    canRecall = takesCommands(prompt),
                     browsingHistory = histIdx != -1,
                     palette = palette,
                     base = base,
                     onFill = ::setField,
                     onRun = ::runTapped,
                     onRecall = ::recall,
+                    onKey = { key ->
+                        touched()
+                        shell.press(key)
+                    },
                 )
             }
 
@@ -536,7 +549,7 @@ private fun StatusLine(shell: Shell, phone: Phone, clock: Long, rev: Int, palett
         }
     }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        BasicText("tty1 · " + if (locked) "locked" else "home", style = small, maxLines = 1)
+        BasicText("tty1 · " + (shell.remoteHost ?: if (locked) "locked" else "home"), style = small, maxLines = 1)
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             if (track != null) {
                 BasicText(
@@ -624,7 +637,7 @@ private fun PromptLine(
     Row(Modifier.fillMaxWidth().alpha(if (prompt == null || hidden) 0f else 1f)) {
         BasicText(
             text = prompt?.text ?: "",
-            style = base.copy(color = if (prompt?.kind == PromptKind.SHELL) palette.accent else palette.fg),
+            style = base.copy(color = if (takesCommands(prompt)) palette.accent else palette.fg),
         )
         BasicTextField(
             value = field,
@@ -672,12 +685,14 @@ private fun PromptLine(
 private fun ChipRow(
     shell: Shell,
     input: String,
+    canRecall: Boolean,
     browsingHistory: Boolean,
     palette: Palette,
     base: TextStyle,
     onFill: (String) -> Unit,
     onRun: (String) -> Unit,
     onRecall: (Int) -> Unit,
+    onKey: (String) -> Unit,
 ) {
     val found = shell.candidates(input)
     Row(
@@ -687,12 +702,20 @@ private fun ChipRow(
     ) {
         if (found == null) return@Row                        // no chips on the lock screen
         // phone keyboards have no arrow keys, so history gets chips of its own
-        if (shell.history.isNotEmpty()) Chip("↑", palette.dim, palette, base) { onRecall(1) }
-        if (browsingHistory) Chip("↓", palette.dim, palette, base) { onRecall(-1) }
+        if (canRecall && shell.history.isNotEmpty()) Chip("↑", palette.dim, palette, base) { onRecall(1) }
+        if (canRecall && browsingHistory) Chip("↓", palette.dim, palette, base) { onRecall(-1) }
         for (item in found.items.take(8)) {
-            Chip(item.text, if (item.kind == ChipKind.APP) palette.app else palette.fg, palette, base) {
-                val pick = shell.pick(input, found, item)
-                if (pick.submit) onRun(pick.text) else onFill(pick.text)
+            val color = when (item.kind) {
+                ChipKind.APP -> palette.app
+                ChipKind.KEY -> palette.accent
+                else -> palette.fg
+            }
+            Chip(item.text, color, palette, base) {
+                if (item.kind == ChipKind.KEY) onKey(item.text)
+                else {
+                    val pick = shell.pick(input, found, item)
+                    if (pick.submit) onRun(pick.text) else onFill(pick.text)
+                }
             }
         }
     }

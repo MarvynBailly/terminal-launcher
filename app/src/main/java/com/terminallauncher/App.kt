@@ -38,7 +38,7 @@ class App : Application() {
         val prefs = getSharedPreferences("terminal", MODE_PRIVATE)
         phone = AndroidPhone(this)
         phone.onChange = ::redraw
-        shell = Shell(phone, PrefsStore(prefs), PrefsVault(prefs))
+        shell = Shell(phone, PrefsStore(prefs), PrefsVault(prefs), AndroidSsh(this))
         shell.onChange = ::redraw
         phone.animate = ::animating
         phone.onError = { message -> onMain { shell.info(message, error = true) } }

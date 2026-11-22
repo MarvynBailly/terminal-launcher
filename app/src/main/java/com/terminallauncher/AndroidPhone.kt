@@ -6,6 +6,8 @@ import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.usage.StorageStatsManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -448,6 +450,13 @@ class AndroidPhone(private val ctx: Context) : Phone {
             MediaKey.NEXT -> controls.skipToNext()
         }
         return true
+    }
+
+    override fun copy(text: String): Boolean = try {
+        ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("terminal", text))
+        true
+    } catch (e: Exception) {
+        false
     }
 
     override fun openPanel(panel: Panel): Boolean = when (panel) {

@@ -42,7 +42,8 @@ data class Note(val app: String, val text: String, val at: Long) : Line
 /** The `np` card: [track] as it was when the command ran. The UI keeps it current while music plays. */
 data class NowPlaying(val track: Track) : Line
 
-enum class PromptKind { LOGIN, SHELL, ASK }
+/** With [REMOTE] what is typed goes to another computer, and the prompt is whatever that computer last wrote. */
+enum class PromptKind { LOGIN, SHELL, ASK, REMOTE }
 
 data class Prompt(val text: String, val kind: PromptKind, val mask: Boolean = false)
 
@@ -75,7 +76,8 @@ enum class MediaKey { PREVIOUS, PLAY, PAUSE, NEXT }
 
 enum class Panel { WIFI, BLUETOOTH }
 
-enum class ChipKind { CMD, APP, ARG }
+/** A [KEY] chip is pressed, not typed: it goes to [Shell.press] and leaves the input alone. */
+enum class ChipKind { CMD, APP, ARG, KEY }
 
 data class Candidate(val text: String, val kind: ChipKind)
 

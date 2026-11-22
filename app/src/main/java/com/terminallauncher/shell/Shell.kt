@@ -8,11 +8,14 @@ import java.util.Calendar
  * It owns the lines on screen and the current prompt, and it talks to the device only through [Phone].
  * The UI renders [lines] and [prompt], sends back what the user typed with [submit], and is told to
  * redraw through [onChange]. All calls are expected on one thread.
+ *
+ * With a [remote], `ssh` hands the prompt to a shell on another computer until that session ends.
  */
 class Shell(
     private val phone: Phone,
     private val store: Store,
     private val vault: Vault,
+    private val remote: Remote? = null,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
@@ -38,6 +41,23 @@ class Shell(
         private const val KEY_SAVER = "saver"
         private const val KEY_FX = "fx"
         private const val KEY_TIP = "tip"
+        private const val KEY_HOSTS = "ssh_hosts"
+        private const val KEY_HOST_KEY = "ssh_key_"        // + the computer: its key type and fingerprint
+        private const val KEY_HOST_USER = "ssh_user_"      // + the computer: who logged in there last
+        private const val MAX_HOSTS = 8
+
+        /** `ssh` asks for the launcher password again once it has been this long since it was typed. */
+        private const val SSH_GRACE_MS = 5 * 60_000L
+
+        /** The keys a remote session offers as chips, and the one a login that is still under way offers. */
+        const val KEY_INTERRUPT = "^C"
+        const val KEY_END = "^D"
+        const val KEY_DISCONNECT = "disconnect"
+        const val KEY_CANCEL = "cancel"
+        private const val INSTALL_MARK = "terminal-launcher-adds-a-key"
+
+        /** A remote prompt that asks for one of these is answered without showing what is typed. */
+        private val SECRET = Regex("(password|passphrase|passcode)[^\\n]*:\\s*$", RegexOption.IGNORE_CASE)
         private val TIPS = listOf(
             "help lists every command",
             "↑ recalls your last command",
@@ -51,6 +71,7 @@ class Shell(
             "ls -l lists apps with their kind",
             "fetch prints the system card",
             "fx off turns the animations off",
+            "ssh user@host logs in to a computer",
         )
         private val SHELL_PROMPT = Prompt("$ ", PromptKind.SHELL)
         private val LOGIN_PROMPT = Prompt("password: ", PromptKind.LOGIN, mask = true)
@@ -101,7 +122,14 @@ class Shell(
         private set
     var onChange: () -> Unit = {}
 
-    val history: List<String> get() = hist
+    /** How many characters fit on a line. The UI sets it, and a remote shell is told. */
+    var columns: Int = WRAP
+
+    /** What ↑ recalls: the launcher's commands, or during a remote session what was typed there. */
+    val history: List<String> get() = session?.takeIf { it.open }?.recall ?: hist
+
+    /** The computer a remote session is on, or null when there is none. */
+    val remoteHost: String? get() = session?.takeIf { it.open }?.target?.host
 
     private val hist = ArrayList<String>()
     private val commands = LinkedHashMap<String, Command>()
@@ -120,6 +148,12 @@ class Shell(
     /** The password was right and Android is asking for its own unlock. See [awaitPhone]. */
     private var waitingForPhone = false
     private var unlockAttempt = 0
+
+    /** A login on another computer, from the moment `ssh` starts connecting. */
+    private var session: Session? = null
+
+    /** When the launcher password was last typed. */
+    private var authAt = 0L
 
     init {
         val saved = store.get(KEY_ALIASES)
@@ -148,13 +182,14 @@ class Shell(
                 val then = pending
                 pending = null
                 prompt = SHELL_PROMPT
-                echo(p, "")
+                echo(p, if (p.mask) "" else input)
                 then?.invoke(input)
             }
             PromptKind.SHELL -> {
                 echo(p, input)
                 runLine(input)
             }
+            PromptKind.REMOTE -> session?.type(input, p.mask)
         }
         onChange()
     }
@@ -166,6 +201,13 @@ class Shell(
 
     /** Ctrl+C. */
     fun cancel(input: String) {
+        val s = session
+        if (s != null && !s.open) {             // still logging in, or answering one of its questions
+            prompt?.let { echo(it, "^C") }
+            s.drop()
+            onChange()
+            return
+        }
         val p = prompt ?: return
         when (p.kind) {
             PromptKind.LOGIN -> return
@@ -175,6 +217,19 @@ class Shell(
                 prompt = SHELL_PROMPT
             }
             PromptKind.SHELL -> echo(p, "$input^C")
+            PromptKind.REMOTE -> s?.interrupt(input)
+        }
+        onChange()
+    }
+
+    /** A tap on one of the key chips a remote session shows. */
+    fun press(key: String) {
+        val s = session ?: return
+        when (key) {
+            KEY_INTERRUPT -> if (s.open) s.interrupt("") else s.drop()
+            KEY_END -> if (s.open) s.link.press(RemoteKey.END)
+            KEY_DISCONNECT, KEY_CANCEL -> s.drop()
+            else -> return
         }
         onChange()
     }
@@ -195,6 +250,14 @@ class Shell(
      */
     fun lock(): Boolean {
         asleep = true
+        // A remote session does not outlast the screen, whether or not the terminal locks.
+        if (session != null) {
+            hangUp()
+            pending = null
+            prompt = SHELL_PROMPT
+            print("The screen turned off: the ssh session was closed.", Style.DIM)
+            onChange()
+        }
         if (!vault.isSet) return false
         locked = true
         waitingForPhone = false
@@ -258,6 +321,15 @@ class Shell(
     /* ---------------- completion ---------------- */
 
     fun candidates(input: String): Candidates? {
+        session?.let { s ->
+            // Nothing to complete on another computer. The chips are the keys a phone keyboard lacks.
+            val keys = when {
+                !s.open -> listOf(KEY_CANCEL)
+                s.terminal -> listOf(KEY_INTERRUPT, KEY_END, KEY_DISCONNECT)
+                else -> listOf(KEY_END, KEY_DISCONNECT)
+            }
+            return Candidates(input.length, "", keys.map { Candidate(it, ChipKind.KEY) })
+        }
         if (prompt?.kind != PromptKind.SHELL) return null
         val body = input.trimStart()
         val lead = input.length - body.length
@@ -299,6 +371,12 @@ class Shell(
             word == "notifs" -> if (firstArg) lastWord(listOf("clear")) else none
             word == "unalias" -> if (firstArg) lastWord(aliases.keys.toList()) else none
             word == "setup" -> if (firstArg) lastWord(phone.setup().map { it.key }) else none
+            word == "ssh" -> when {
+                firstArg -> lastWord(hosts() + listOf("key", "forget"))
+                arg.startsWith("forget ") -> lastWord(hosts().map { it.substringAfter('@') }.distinct())
+                else -> none
+            }
+            word == "ssh-copy-id" -> if (firstArg) lastWord(hosts()) else none
             word in commands || word in aliases -> none
             // not a command, so the whole line is an app name with spaces in it
             else -> Candidates(lead, body.lowercase(), apps(matchApps(body.lowercase())))
@@ -329,6 +407,11 @@ class Shell(
     private fun add(line: Line) {
         lines = (lines + line).takeLast(MAX_LINES)
         lineIds = (lineIds + nextId++).takeLast(MAX_LINES)
+    }
+
+    private fun addAll(more: List<Line>) {
+        lines = (lines + more).takeLast(MAX_LINES)
+        lineIds = (lineIds + more.map { nextId++ }).takeLast(MAX_LINES)
     }
 
     /** Replaces everything on screen. */
@@ -396,6 +479,7 @@ class Shell(
     }
 
     private fun showLock(note: String? = null) {
+        hangUp()
         toLockHeader()
         locked = true
         waitingForPhone = false
@@ -413,6 +497,7 @@ class Shell(
     private fun login(password: String) {
         if (vault.matches(password)) {
             fails = 0
+            authAt = now()
             if (phone.deviceLocked()) awaitPhone() else openHome()
             return
         }
@@ -676,6 +761,298 @@ class Shell(
             command != null && (app == null || command.second <= app.second) ->
                 if (rest.isEmpty()) command.first else "${command.first} $rest"
             else -> app?.first
+        }
+    }
+
+    /* ---------------- ssh ---------------- */
+
+    /** The logins that worked, latest first, as they are typed after `ssh`. */
+    private fun hosts(): List<String> = store.get(KEY_HOSTS)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+
+    /** Ends a remote session without a word. Whatever it reports from then on is ignored. */
+    private fun hangUp() {
+        val s = session ?: return
+        session = null
+        s.link.close()
+    }
+
+    /**
+     * One login on another computer. Until it is [open] the terminal takes nothing but the answers the
+     * login asks for. After that each line typed goes to the far end, and what the far end writes is
+     * printed. The text it leaves without a line break, usually its own prompt, becomes the prompt here.
+     */
+    private inner class Session(val target: Target, val install: String?) : LinkEvents {
+        lateinit var link: Link
+        var open = false
+        val recall = ArrayList<String>()
+        private val text = RemoteText()
+
+        /** false on a computer that gave no terminal: it repeats what it is sent, and has no ^C. */
+        var terminal = true
+
+        /** A line the far end is about to repeat back. */
+        private var sent: String? = null
+
+        /** Output is not shown until a line ends with this. `ssh-copy-id` uses it to skip the greeting. */
+        private var hiddenUntil: String? = null
+
+        /** An interrupted shell answers with an empty line before its prompt. One of those is not shown. */
+        private var interrupted = false
+
+        private val live get() = session === this
+
+        /** Asks the user something for the login. Once answered, the terminal goes quiet again. */
+        private fun inquire(question: String, mask: Boolean, then: (String) -> Unit) = this@Shell.ask(question, mask) { typed ->
+            if (live) {
+                prompt = null
+                then(typed)
+            }
+        }
+
+        private fun showPrompt() {
+            var partial = if (hiddenUntil == null) text.pending else ""
+            // the start of an echo that is still arriving is not a prompt
+            sent?.let { if (it.startsWith(partial)) partial = "" }
+            // a long prompt keeps its end, so there is still room to type beside it
+            val room = (columns / 2).coerceAtLeast(8)
+            val shown = if (partial.length <= room) partial else "…" + partial.takeLast(room - 1)
+            prompt = Prompt(shown, PromptKind.REMOTE, SECRET.containsMatchIn(partial))
+        }
+
+        /** Back to the launcher's own prompt, with [message] as the last word on the session. */
+        private fun finish(message: String, error: Boolean) {
+            val rest = text.take()
+            if (rest.isNotBlank()) add(TextLine(listOf(Span(rest)), Entrance.NONE))
+            pending = null
+            print(message, if (error) Style.ERR else Style.DIM)
+            prompt = SHELL_PROMPT
+        }
+
+        fun type(input: String, secret: Boolean) {
+            add(TextLine(listOf(Span(text.take(), Style.ACCENT), Span(if (secret) "" else input)), Entrance.NONE))
+            if (!secret && input.isNotBlank() && recall.lastOrNull() != input) {
+                recall.add(input)
+                if (recall.size > MAX_HISTORY) recall.removeAt(0)
+            }
+            sent = input.takeIf { !terminal && !secret && it.isNotBlank() }
+            interrupted = false
+            link.send(input + "\n")
+            showPrompt()
+        }
+
+        fun interrupt(input: String) {
+            if (!terminal) {
+                // there the signal would end the whole session, which is what disconnect is for
+                print("This computer gave no terminal, so it has no ^C. disconnect stops a command.", Style.DIM)
+                return
+            }
+            add(TextLine(listOf(Span(text.take(), Style.ACCENT), Span("$input^C")), Entrance.NONE))
+            sent = null
+            interrupted = true
+            link.press(RemoteKey.INTERRUPT)
+            showPrompt()
+        }
+
+        /** The user ends it from this side. */
+        fun drop() {
+            val wasOpen = open
+            hangUp()
+            finish(if (wasOpen) "Disconnected from ${target.host}." else "ssh: cancelled", error = false)
+        }
+
+        override fun hostKey(type: String, fingerprint: String) {
+            if (!live) return
+            val shown = "$type $fingerprint"
+            when (val known = store.get(KEY_HOST_KEY + target.place)) {
+                shown -> link.trust(true)
+                null -> {
+                    print("First connection to ${target.place}.")
+                    print("Its $type key fingerprint is", Style.DIM)
+                    print(fingerprint)
+                    inquire("trust it? (yes/no) ", mask = false) { typed ->
+                        val yes = typed.trim().lowercase() in setOf("y", "yes")
+                        if (yes) store.put(KEY_HOST_KEY + target.place, shown)
+                        link.trust(yes)
+                    }
+                }
+                else -> {
+                    print("WARNING: ${target.place} is not showing the key it had before.", Style.ERR)
+                    print("was  $known", Style.DIM)
+                    print("now  $shown", Style.DIM)
+                    print("Another computer may be answering in its place. If this one was reinstalled, forget the old key and connect again:", Style.DIM)
+                    val fix = "ssh forget ${target.place}"
+                    row(Span(fix, Style.APP, fill = fix))
+                    link.trust(false)
+                }
+            }
+            onChange()
+        }
+
+        override fun ask(question: String, secret: Boolean, again: Boolean) {
+            if (!live) return
+            if (again) print("Permission denied, please try again.", Style.ERR)
+            inquire(question, secret) { link.answer(it) }
+            onChange()
+        }
+
+        override fun notice(text: String) {
+            if (!live) return
+            // through the same filter as the session, so a banner cannot send control codes either
+            RemoteText().feed(text + "\n").filter { it.isNotBlank() }.forEach { print(it, Style.DIM) }
+            onChange()
+        }
+
+        override fun opened(server: String, terminal: Boolean) {
+            if (!live) return
+            open = true
+            this.terminal = terminal
+            pending = null
+            store.put(KEY_HOST_USER + target.place, target.user)
+            store.put(KEY_HOSTS, (listOf(target.label) + hosts().filter { it != target.label }).take(MAX_HOSTS).joinToString("\n"))
+            if (install != null) {
+                if ("windows" in server.lowercase()) {
+                    print("ssh-copy-id: this is a Windows computer.", Style.ERR)
+                    print("Add the key to its authorized_keys file by hand. ssh key shows the key.", Style.DIM)
+                } else {
+                    hiddenUntil = INSTALL_MARK
+                    link.send(installLine(install))
+                }
+            }
+            showPrompt()
+            onChange()
+        }
+
+        override fun output(text: String) {
+            if (!live || !open) return
+            var done = this.text.feed(text)
+            hiddenUntil?.let { mark ->
+                val at = done.indexOfFirst { it.endsWith(mark) }
+                if (at >= 0) hiddenUntil = null
+                done = if (at >= 0) done.drop(at + 1) else emptyList()
+            }
+            val expected = sent
+            if (expected != null && done.isNotEmpty()) {
+                sent = null
+                if (done[0].trim() == expected.trim()) done = done.drop(1)
+            }
+            if (interrupted && done.isNotEmpty()) {
+                interrupted = false
+                if (done[0].isBlank()) done = done.drop(1)
+            }
+            if (done.isNotEmpty()) addAll(done.map { TextLine(listOf(Span(it)), Entrance.NONE) })
+            showPrompt()
+            onChange()
+        }
+
+        override fun closed(reason: String?) {
+            if (!live) return
+            session = null
+            when {
+                reason != null -> finish("ssh: $reason", error = true)
+                open -> finish("Connection to ${target.host} closed.", error = false)
+                else -> finish("ssh: ${target.host} closed the connection", error = true)
+            }
+            onChange()
+        }
+    }
+
+    /**
+     * What `ssh-copy-id` runs on the far end: adds [key] to the account's authorized keys unless it is
+     * there already, says so, and logs out. Plain enough for sh, bash, zsh and fish. It first prints
+     * [INSTALL_MARK], so the greeting and the prompt before it can be left off the screen.
+     */
+    private fun installLine(key: String): String {
+        val file = "~/.ssh/authorized_keys"
+        return " echo $INSTALL_MARK; umask 077; mkdir -p ~/.ssh; grep -qxF '$key' $file 2>/dev/null || echo '$key' >> $file; " +
+            "grep -qxF '$key' $file && echo 'Key installed. The next login needs no password.'; exit\n"
+    }
+
+    /** Reads `[user@]host[:port] [-p port] [-l user]`. Prints what is wrong and returns null if it cannot. */
+    private fun parseTarget(cmd: String, args: List<String>): Triple<String?, String, Int>? {
+        fun fail(message: String): Triple<String?, String, Int>? {
+            print("$cmd: $message", Style.ERR)
+            return null
+        }
+        var user: String? = null
+        var port: Int? = null
+        var spec: String? = null
+        var i = 0
+        while (i < args.size) {
+            val a = args[i]
+            when {
+                a == "-p" || a == "-l" -> {
+                    val value = args.getOrNull(++i) ?: return fail("$a needs a value")
+                    if (a == "-l") user = value
+                    else port = value.toIntOrNull()?.takeIf { it in 1..65535 } ?: return fail("no port '$value'")
+                }
+                a.startsWith("-") -> return fail("no option $a")
+                spec == null -> spec = a
+                else -> return fail("log in first, then type the command there")
+            }
+            i++
+        }
+        var host = spec ?: return fail("which computer?")
+        val at = host.lastIndexOf('@')
+        if (at >= 0) {
+            user = host.substring(0, at)
+            host = host.substring(at + 1)
+        }
+        if (host.count { it == ':' } == 1) {            // host:port. More colons would be an IPv6 address.
+            val p = host.substringAfter(':')
+            port = port ?: p.toIntOrNull()?.takeIf { it in 1..65535 } ?: return fail("no port '$p'")
+            host = host.substringBefore(':')
+        }
+        if (host.isEmpty() || user?.isEmpty() == true) return fail("which computer?")
+        return Triple(user, host.lowercase(), port ?: 22)
+    }
+
+    /** Works out who to log in as, then connects. With [install], the session only adds that key and leaves. */
+    private fun sshTo(cmd: String, args: List<String>, install: String? = null) {
+        val (user, host, port) = parseTarget(cmd, args) ?: return
+        val known = user ?: store.get(KEY_HOST_USER + Target("", host, port).place)
+        if (known != null) connect(Target(known, host, port), install)
+        else ask("login as: ", mask = false) { name ->
+            if (name.isBlank()) print("$cmd: no user given", Style.ERR) else connect(Target(name.trim(), host, port), install)
+        }
+    }
+
+    /**
+     * The phone holds a key to other computers, so `ssh` wants the launcher password again unless it
+     * was typed a moment ago, the way `sudo` does. With no password set there is nothing to ask.
+     */
+    private fun connect(target: Target, install: String?) {
+        val r = remote
+        if (r == null) {
+            print("ssh: not available here", Style.ERR)
+        } else if (vault.isSet && now() - authAt > SSH_GRACE_MS) {
+            ask("launcher password: ") { typed ->
+                if (vault.matches(typed)) {
+                    authAt = now()
+                    dial(r, target, install)
+                } else print("ssh: wrong launcher password", Style.ERR)
+            }
+        } else dial(r, target, install)
+    }
+
+    private fun dial(r: Remote, target: Target, install: String?) {
+        print("connecting to ${target.place}…", Style.DIM)
+        val s = Session(target, install)
+        session = s
+        prompt = null
+        s.link = r.open(target, columns, store.get(KEY_HOST_KEY + target.place)?.substringBefore(' '), s)
+    }
+
+    private fun sshKey(copy: Boolean) {
+        val key = remote?.publicKey()
+        when {
+            remote == null -> print("ssh: not available here", Style.ERR)
+            key == null -> print("ssh: could not make a key", Style.ERR)
+            copy -> if (phone.copy(key)) print("copied", Style.DIM) else print("ssh: could not reach the clipboard", Style.ERR)
+            else -> {
+                print("This phone's public key. Tap it to copy.", Style.DIM)
+                add(TextLine(listOf(Span(key, run = "ssh key copy"))))
+                row(Span("put it on a computer: ", Style.DIM), Span("ssh-copy-id", Style.APP, fill = "ssh-copy-id "))
+            }
         }
     }
 
@@ -1016,6 +1393,35 @@ class Shell(
             } else {
                 print("$key is already on", Style.DIM)
             }
+        }
+        def("ssh", "system", "ssh <user@host>", "remote shell") { args, _ ->
+            when (args.firstOrNull()?.lowercase()) {
+                null -> {
+                    print("usage: ssh [user@]host [-p port]", Style.DIM)
+                    choices(hosts(), "", "ssh")
+                    row(Span("ssh key".padEnd(17), Style.APP, "ssh key"), Span("this phone's key", Style.DIM))
+                    row(Span("ssh-copy-id".padEnd(17), Style.APP, fill = "ssh-copy-id "), Span("put it on a host", Style.DIM))
+                    row(Span("ssh forget".padEnd(17), Style.APP, fill = "ssh forget "), Span("drop a host's key", Style.DIM))
+                }
+                "key" -> sshKey(copy = args.getOrNull(1) == "copy")
+                "forget" -> {
+                    val name = args.getOrNull(1)?.substringAfter('@')?.lowercase()
+                    if (name == null) print("usage: ssh forget <host>", Style.ERR)
+                    else if (store.get(KEY_HOST_KEY + name) == null) print("ssh: no saved key for $name", Style.ERR)
+                    else {
+                        store.put(KEY_HOST_KEY + name, null)
+                        print("forgot the key of $name")
+                    }
+                }
+                else -> sshTo("ssh", args)
+            }
+        }
+        def("ssh-copy-id", null, "ssh-copy-id <user@host>", "install this phone's key") { args, _ ->
+            val key = remote?.publicKey()
+            if (args.isEmpty()) print("usage: ssh-copy-id [user@]host", Style.ERR)
+            else if (remote == null) print("ssh-copy-id: not available here", Style.ERR)
+            else if (key == null) print("ssh-copy-id: could not make a key", Style.ERR)
+            else sshTo("ssh-copy-id", args, key)
         }
         def("clear", "system", "clear", "clear the screen") { _, _ -> page(emptyList()) }
         def("lock", "system", "lock", "lock the phone") { _, _ ->

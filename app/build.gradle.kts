@@ -78,6 +78,8 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.core:core-ktx:1.12.0")
+    // ssh
+    implementation("com.github.mwiede:jsch:2.28.8")
 
     testImplementation("junit:junit:4.13.2")
 }

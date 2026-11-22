@@ -10,7 +10,7 @@ import org.junit.Test
 import java.util.Locale
 import java.util.TimeZone
 
-private class FakePhone : Phone {
+internal class FakePhone : Phone {
     val names = listOf(
         "browser", "calculator", "calendar", "camera", "clock", "contacts", "files", "firefox", "mail",
         "maps", "messages", "music", "notes", "phone", "photos", "play store", "settings", "signal",
@@ -61,6 +61,8 @@ private class FakePhone : Phone {
     override fun nowPlaying(): Track? = if (notifAccess) track else null
     override fun media(key: MediaKey): Boolean { keys += key; return track != null }
     override fun openPanel(panel: Panel): Boolean { panels += panel; return true }
+    val copied = ArrayList<String>()
+    override fun copy(text: String): Boolean { copied += text; return true }
     override fun setup() = listOf(SetupItem("home", "default home app", true), SetupItem("notifs", "read notifications", notifAccess))
     override fun fix(key: String): Boolean { fixed += key; return key != "home" }
 
@@ -71,13 +73,13 @@ private class FakePhone : Phone {
     override fun unlockDevice(done: (Boolean) -> Unit) { unlockAnswer = done }
 }
 
-private class FakeStore : Store {
+internal class FakeStore : Store {
     val map = HashMap<String, String>()
     override fun get(key: String) = map[key]
     override fun put(key: String, value: String?) { if (value == null) map.remove(key) else map[key] = value }
 }
 
-private class FakeVault(var password: String? = null) : Vault {
+internal class FakeVault(var password: String? = null) : Vault {
     override val isSet get() = password != null
     override fun matches(password: String) = this.password == password
     override fun set(password: String?) { this.password = password }
