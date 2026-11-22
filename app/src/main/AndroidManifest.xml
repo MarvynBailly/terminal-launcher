@@ -10,6 +10,11 @@
     <uses-permission
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
+    <!-- `screen`: reads Android's own log of the screen turning on and the phone being unlocked.
+         Declaring it only puts the app on the "usage access" list, where `setup usage` sends the user. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <!-- the wifi marker in the status line -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- `ssh` and `weather`: the only two things in the app that open a connection -->

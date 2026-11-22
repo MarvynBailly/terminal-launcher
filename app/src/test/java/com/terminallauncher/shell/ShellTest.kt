@@ -63,8 +63,19 @@ internal class FakePhone : Phone {
     override fun openPanel(panel: Panel): Boolean { panels += panel; return true }
     val copied = ArrayList<String>()
     override fun copy(text: String): Boolean { copied += text; return true }
-    override fun setup() = listOf(SetupItem("home", "default home app", true), SetupItem("notifs", "read notifications", notifAccess))
+    override fun setup() = listOfNotNull(
+        SetupItem("home", "default home app", true),
+        SetupItem("notifs", "read notifications", notifAccess),
+        SetupItem("usage", "screen time and unlocks", usageAccess).takeIf { keepsScreenLog },
+    )
     override fun fix(key: String): Boolean { fixed += key; return key != "home" }
+
+    /** The phone's log of its screen. A test plays the phone by calling [logRead] with what it holds. */
+    var usageAccess = false
+    var keepsScreenLog = true
+    val logAsked = ArrayList<Long>()
+    var logRead: ((ScreenLog?) -> Unit)? = null
+    override fun screenLog(from: Long, done: (ScreenLog?) -> Unit) { logAsked += from; logRead = done }
 
     /** Android's own lock screen, and the answer it is still waiting to give to an unlock request. */
     var androidLocked = false

@@ -3,9 +3,12 @@ package com.terminallauncher
 import android.Manifest
 import android.app.Activity
 import android.app.ActivityOptions
+import android.app.AppOpsManager
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.usage.StorageStatsManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
@@ -28,6 +31,8 @@ import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.Process
 import android.os.StatFs
 import android.os.SystemClock
 import android.os.UserHandle
@@ -45,6 +50,9 @@ import com.terminallauncher.shell.MediaKey
 import com.terminallauncher.shell.Notif
 import com.terminallauncher.shell.Panel
 import com.terminallauncher.shell.Phone
+import com.terminallauncher.shell.ScreenChange
+import com.terminallauncher.shell.ScreenLog
+import com.terminallauncher.shell.ScreenLogReader
 import com.terminallauncher.shell.SetupItem
 import com.terminallauncher.shell.SystemInfo
 import com.terminallauncher.shell.Track
@@ -466,6 +474,66 @@ class AndroidPhone(private val ctx: Context) : Phone {
         Panel.BLUETOOTH -> start(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
     }
 
+    /* ---------------- screen time ---------------- */
+
+    /** Android has logged the screen and its lock since version 9. */
+    private val keepsScreenLog = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+
+    private fun usageAccess(): Boolean {
+        val ops = ctx.getSystemService(AppOpsManager::class.java)
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName)
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    /**
+     * The log is Android's own, the one its Digital Wellbeing page is drawn from. Android keeps
+     * writing it whether or not this app is running, which is why it is read and not kept here.
+     * A week of it is tens of thousands of entries, most of them about apps, so it is read off the
+     * main thread and only what the screen and the lock did is kept.
+     */
+    override fun screenLog(from: Long, done: (ScreenLog?) -> Unit) {
+        if (!keepsScreenLog || !usageAccess()) {
+            main.post { done(null) }
+            return
+        }
+        thread(name = "screen-log") {
+            val log = try {
+                readScreenLog(from)
+            } catch (e: Exception) {
+                null
+            }
+            main.post { done(log) }
+        }
+    }
+
+    private fun readScreenLog(from: Long): ScreenLog? {
+        val now = System.currentTimeMillis()
+        // null while the phone has not been unlocked since it started
+        val found = ctx.getSystemService(UsageStatsManager::class.java).queryEvents(from, now) ?: return null
+        val reader = ScreenLogReader()
+        val event = UsageEvents.Event()
+        while (found.getNextEvent(event)) {
+            val type = event.eventType
+            val change = when (type) {
+                UsageEvents.Event.SCREEN_INTERACTIVE -> ScreenChange.ON
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> ScreenChange.OFF
+                UsageEvents.Event.KEYGUARD_SHOWN -> ScreenChange.LOCKED
+                UsageEvents.Event.KEYGUARD_HIDDEN -> ScreenChange.UNLOCKED
+                // Written when the phone next starts, with the last time its log was saved.
+                UsageEvents.Event.DEVICE_SHUTDOWN -> ScreenChange.SHUTDOWN
+                else -> null
+            }
+            reader.take(event.timeStamp, change, marker = type == UsageEvents.Event.DEVICE_SHUTDOWN || type == UsageEvents.Event.DEVICE_STARTUP)
+        }
+        val power = ctx.getSystemService(PowerManager::class.java)
+        return reader.log(now, on = power.isInteractive, locked = keyguard.isKeyguardLocked)
+    }
+
     /* ---------------- setup ---------------- */
 
     private fun isHome(): Boolean {
@@ -473,9 +541,10 @@ class AndroidPhone(private val ctx: Context) : Phone {
         return pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName == ctx.packageName
     }
 
-    override fun setup(): List<SetupItem> = listOf(
+    override fun setup(): List<SetupItem> = listOfNotNull(
         SetupItem("home", "default home app", isHome()),
         SetupItem("notifs", "read notifications", notifAccess()),
+        SetupItem("usage", "screen time and unlocks", usageAccess()).takeIf { keepsScreenLog },
         SetupItem("bright", "change brightness", Settings.System.canWrite(ctx)),
         SetupItem("contacts", "call and sms by name", granted(Manifest.permission.READ_CONTACTS)),
         SetupItem("calls", "call without the dialer", granted(Manifest.permission.CALL_PHONE)),
@@ -486,6 +555,9 @@ class AndroidPhone(private val ctx: Context) : Phone {
         return when (key) {
             "home" -> start(Intent(Settings.ACTION_HOME_SETTINGS))
             "notifs" -> start(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            // Straight to this app's switch where Android has such a page, otherwise to the list of apps.
+            "usage" -> !usageAccess() &&
+                (start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, self)) || start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)))
             "bright" -> start(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, self))
             "contacts" -> ask(Manifest.permission.READ_CONTACTS, self)
             "calls" -> ask(Manifest.permission.CALL_PHONE, self)

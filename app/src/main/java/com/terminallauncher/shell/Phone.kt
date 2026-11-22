@@ -54,6 +54,14 @@ interface Phone {
     /** Puts [text] on the clipboard. */
     fun copy(text: String): Boolean
 
+    /**
+     * Reads the phone's own log of its screen and lock from [from] up to now. The answer comes
+     * later, on the thread the shell runs on. It is null if the log cannot be read, which it cannot
+     * until the user grants the `usage` item of [setup].
+     */
+    fun screenLog(from: Long, done: (ScreenLog?) -> Unit)
+
+    /** An item is left out where this phone has no such thing to grant. */
     fun setup(): List<SetupItem>
 
     /** Opens the settings page or permission dialog for a setup item. false if there is nothing to do. */

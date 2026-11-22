@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
  * redraw through [onChange]. All calls are expected on one thread.
  *
  * With a [remote], `ssh` hands the prompt to a shell on another computer until that session ends.
- * With a [weather], `weather` prints a forecast.
+ * With a [weather], `weather` prints a forecast and the login summary has a line of it.
  */
 class Shell(
     private val phone: Phone,
@@ -63,8 +63,25 @@ class Shell(
         private const val KEY_PLACE = "weather_place"      // the city `weather` reports, one field a line
         private const val KEY_UNITS = "weather_units"      // c or f; unset follows the phone's region
 
+        private const val KEY_AT_LOGIN = "weather_login"   // off keeps the weather out of the login summary
+
         /** A forecast this fresh is shown again without asking for a new one. */
         private const val FORECAST_FRESH_MS = 10 * 60_000L
+
+        /**
+         * The login summary makes do with an older one. It prints at every unlock, and the phone
+         * should not go to the network that often for a line that is read at a glance.
+         */
+        private const val LOGIN_FRESH_MS = 30 * 60_000L
+
+        /** How many days `screen` shows, today included. The phone's own log goes back about this far. */
+        private const val SCREEN_DAYS = 7
+
+        /** From this chance up, the login summary says that today may be wet. */
+        private const val WET_WORTH_SAYING = 30
+
+        /** The WMO codes for snow, where "rain" would be the wrong word for it. */
+        private val SNOW_CODES = setOf(71, 73, 75, 77, 85, 86)
 
         /** Where the weather is read in Fahrenheit and miles an hour. */
         private val IMPERIAL_COUNTRIES = setOf("US", "BS", "BZ", "KY", "PW", "FM", "MH", "LR")
@@ -86,6 +103,7 @@ class Shell(
             "fx off turns the animations off",
             "ssh user@host logs in to a computer",
             "weather prints the forecast",
+            "screen shows your time on the phone",
         )
         private val SHELL_PROMPT = Prompt("$ ", PromptKind.SHELL)
         private val LOGIN_PROMPT = Prompt("password: ", PromptKind.LOGIN, mask = true)
@@ -421,8 +439,9 @@ class Shell(
             }
             word == "ssh-copy-id" -> if (firstArg) lastWord(hosts()) else none
             word == "weather" -> when {
-                firstArg -> lastWord(listOf("set", "units"))
+                firstArg -> lastWord(listOf("set", "units", "login"))
                 arg.startsWith("units ") -> lastWord(listOf("c", "f"))
+                arg.startsWith("login ") -> lastWord(listOf("on", "off"))
                 else -> none
             }
             word in commands || word in aliases -> none
@@ -466,6 +485,14 @@ class Shell(
     private fun page(content: List<Line>) {
         lines = content
         lineIds = content.map { nextId++ }
+    }
+
+    /** Puts [line] where the line with [id] is. false if that line has left the screen. */
+    private fun replace(id: Long, line: Line): Boolean {
+        val at = lineIds.indexOf(id)
+        if (at < 0) return false
+        lines = lines.toMutableList().also { it[at] = line }
+        return true
     }
 
     /** Takes one line back off the screen, if it is still there. */
@@ -664,7 +691,10 @@ class Shell(
         store.put(KEY_LAST_LOGIN, now().toString())
     }
 
-    /** The message of the day: how far along the day, week and year are, what is waiting, and a tip. */
+    /**
+     * The message of the day: how far along the day, week and year are, the weather, how much the
+     * phone has been used today, what is waiting, and a tip.
+     */
     private fun motd() {
         val t = now()
         print()
@@ -673,6 +703,8 @@ class Shell(
         add(Gauge("year", Fmt.yearPercent(t), "${Fmt.yearPercent(t)}%"))
         print()
 
+        loginWeather()
+        loginScreenTime()
         val status = ArrayList<Span>()
         phone.notifications()?.let {
             status += if (it.isEmpty()) Span("nothing new", Style.DIM) else Span("${it.size} new", Style.APP, "notifs")
@@ -1254,11 +1286,74 @@ class Shell(
         }
     }
 
+    // What arrives is checked where it is read, but a number that cannot be rounded must not end the app.
+    private fun whole(v: Double): String = if (v.isNaN() || v.isInfinite()) "?" else v.roundToInt().toString()
+    private fun degrees(v: Double) = whole(v) + "°"
+
+    /**
+     * The weather in one line of the login summary, for the city `weather` reports. With no city, or
+     * after `weather login off`, there is no line and nothing is asked.
+     *
+     * It never holds the prompt up. A forecast newer than [LOGIN_FRESH_MS] is printed as it is.
+     * Otherwise a line saying one is on its way is printed, and filled in when the answer comes. If
+     * that line has left the screen by then, because the page was cleared or the terminal locked,
+     * the answer is kept for the next login and nothing is shown.
+     */
+    private fun loginWeather() {
+        val w = weather ?: return
+        if (store.get(KEY_AT_LOGIN) == "off") return
+        val place = savedPlace() ?: return
+        val imperial = imperial()
+        val known = lastForecast?.takeIf { it.place == place && it.imperial == imperial && now() - it.at in 0 until LOGIN_FRESH_MS }
+        if (known != null) {
+            add(brief(known))
+            return
+        }
+        // Tappable like the line that takes its place, so the two are the same height.
+        add(TextLine(listOf(Span("weather …", Style.DIM, "weather"))))
+        val id = nextId - 1
+        w.forecast(place, imperial) { forecast, _ ->
+            val got = forecast?.let { FreshForecast(place, imperial, now(), it) }
+            if (got != null) lastForecast = got
+            // Why there is none is too long for the summary. A tap runs `weather`, which says.
+            val line = if (got != null) brief(got) else TextLine(listOf(Span("weather unavailable", Style.DIM, "weather")))
+            if (replace(id, line)) onChange()
+        }
+    }
+
+    /**
+     * A forecast in one line: the weather now, today's high and low, and the chance of rain or snow
+     * if that is worth saying. What does not fit on the screen is left off from the end. A tap
+     * anywhere on it runs `weather`.
+     */
+    private fun brief(got: FreshForecast): TextLine {
+        val f = got.forecast
+        val parts = ArrayList<String>()
+        parts += degrees(f.temperature) + (if (got.imperial) "F " else "C ") + describeWeather(f.code)
+        f.days.firstOrNull()?.let { today ->
+            parts += degrees(today.high) + "/" + degrees(today.low)
+            val wet = today.wet
+            if (wet != null && wet >= WET_WORTH_SAYING) parts += (if (today.code in SNOW_CODES) "snow" else "rain") + " $wet%"
+        }
+        while (parts.size > 1 && parts.sumOf { it.length } + 3 * (parts.size - 1) > columns) parts.removeAt(parts.size - 1)
+        val spans = arrayListOf(Span(parts[0], Style.APP, "weather"))
+        if (parts.size > 1) spans += Span(parts.drop(1).joinToString("") { " · $it" }, Style.DIM, "weather")
+        return TextLine(spans)
+    }
+
+    private fun weatherAtLogin(word: String?) {
+        when (val choice = word?.lowercase()) {
+            null -> choices(listOf("on", "off"), if (store.get(KEY_AT_LOGIN) == "off") "off" else "on", "weather login")
+            "on", "off" -> {
+                store.put(KEY_AT_LOGIN, choice)
+                print("weather at login $choice")
+            }
+            else -> print("usage: weather login [on|off]", Style.ERR)
+        }
+    }
+
     private fun showForecast(got: FreshForecast, source: String) {
         val f = got.forecast
-        // What arrives is checked where it is read, but a number that cannot be rounded must not end the app.
-        fun whole(v: Double): String = if (v.isNaN() || v.isInfinite()) "?" else v.roundToInt().toString()
-        fun degrees(v: Double) = whole(v) + "°"
         print(got.place.label, Style.ACCENT)
         row(Span(degrees(f.temperature) + if (got.imperial) "F" else "C"), Span("  " + describeWeather(f.code)))
         print(
@@ -1288,6 +1383,92 @@ class Shell(
                 print(if (unit == "f") "weather in °F and mph" else "weather in °C and km/h")
             }
             else -> print("usage: weather units [c|f]", Style.ERR)
+        }
+    }
+
+    /* ---------------- screen time ---------------- */
+
+    /** Midnight at the start of the day [daysAgo] days before today, by the phone's own calendar. */
+    private fun dayStart(daysAgo: Int): Long = Calendar.getInstance().apply {
+        timeInMillis = now()
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        add(Calendar.DAY_OF_YEAR, -daysAgo)
+    }.timeInMillis
+
+    /** Whether the phone's log of its screen may be read. null on a phone that keeps none. */
+    private fun usageAccess(): Boolean? = phone.setup().firstOrNull { it.key == "usage" }?.ok
+
+    private fun onScreen(ms: Long): String = Fmt.span(ms / 60_000)
+
+    /** `screen`: the last [SCREEN_DAYS] days, as far back as the phone's log goes. */
+    private fun screenTime() {
+        when (usageAccess()) {
+            null -> {
+                print("screen: this phone keeps no log of it", Style.ERR)
+                return
+            }
+            false -> {
+                needs("usage", "screen: usage access is off")
+                return
+            }
+            true -> {}
+        }
+        val days = (SCREEN_DAYS - 1 downTo 0).map(::dayStart)
+        val ticket = wait("screen", "reading the phone's log")
+        // From a day further back than is shown: that says how things stood when the first day began,
+        // and whether the log holds all of that day or starts part way through it.
+        phone.screenLog(dayStart(SCREEN_DAYS)) { log ->
+            if (!answered(ticket)) return@screenLog
+            if (log == null) print("screen: the phone's log could not be read", Style.ERR) else showScreenTime(log, days)
+            onChange()
+        }
+    }
+
+    private fun showScreenTime(log: ScreenLog, days: List<Long>) {
+        val all = tallyScreen(log, days, now())
+        // Only the days the log reaches. Today is always one of them.
+        val shown = all.filterIndexed { i, _ -> i == all.lastIndex || days[i + 1] > log.since }
+        val most = shown.maxOf { it.screenMs }.coerceAtLeast(1)
+        shown.forEachIndexed { i, day ->
+            val label = if (i == shown.lastIndex) "today" else Fmt.weekday(day.start).lowercase()
+            add(Gauge(label, (day.screenMs * 100 / most).toInt(), onScreen(day.screenMs).padStart(7) + day.unlocks.toString().padStart(5)))
+        }
+        // An average needs whole days: not today, and not the day the log starts part way through.
+        val whole = shown.dropLast(1).filter { it.start >= log.since }
+        if (whole.isEmpty()) print("time on screen, and unlocks", Style.DIM)
+        else {
+            val time = whole.sumOf { it.screenMs } / whole.size
+            val unlocks = (whole.sumOf { it.unlocks } + whole.size / 2) / whole.size
+            print("average: ${onScreen(time)} on screen, ${unlockCount(unlocks)} a day", Style.DIM)
+        }
+    }
+
+    private fun unlockCount(n: Int): String = if (n == 1) "1 unlock" else "$n unlocks"
+
+    /**
+     * Today's screen time and unlocks in one line of the login summary. There is no line until the
+     * phone's log may be read. Like the weather's, it is printed as on its way and filled in when
+     * the log has been read, so the prompt does not wait for it.
+     */
+    private fun loginScreenTime() {
+        if (usageAccess() != true) return
+        add(TextLine(listOf(Span("screen time …", Style.DIM, "screen"))))
+        val id = nextId - 1
+        val today = listOf(dayStart(0))
+        phone.screenLog(today[0]) { log ->
+            val line = if (log == null) TextLine(listOf(Span("screen time unavailable", Style.DIM, "screen")))
+            else tallyScreen(log, today, now())[0].let { use ->
+                TextLine(
+                    listOf(
+                        Span("${onScreen(use.screenMs)} on screen", Style.APP, "screen"),
+                        Span(" · ${unlockCount(use.unlocks)}", Style.DIM, "screen"),
+                    ),
+                )
+            }
+            if (replace(id, line)) onChange()
         }
     }
 
@@ -1443,6 +1624,9 @@ class Shell(
             val b = phone.battery()
             print("${b.percent}%  ${if (b.charging) "charging" else "on battery"}")
         }
+        def("screen", "phone", "screen", "screen time") { args, _ ->
+            if (args.isNotEmpty()) print("usage: screen", Style.ERR) else screenTime()
+        }
         def("np", "phone", "np [next|prev]", "now playing") { args, _ ->
             val word = args.firstOrNull()?.lowercase()
             val key = when (word) {
@@ -1496,6 +1680,7 @@ class Shell(
             when {
                 w == null -> print("weather: not available here", Style.ERR)
                 first == "units" -> if (args.size > 2) print("usage: weather units [c|f]", Style.ERR) else weatherUnits(args.getOrNull(1))
+                first == "login" -> if (args.size > 2) print("usage: weather login [on|off]", Style.ERR) else weatherAtLogin(args.getOrNull(1))
                 first == "set" -> {
                     val city = afterFirst(rest)
                     if (city.isBlank()) print("usage: weather set <city>", Style.ERR) else lookUp(w, city, keep = true)

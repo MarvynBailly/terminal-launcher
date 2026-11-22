@@ -32,9 +32,11 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `vol [0-100]`, `bright [0-100]` | media volume and screen brightness |
 | `np [pause\|play\|next\|prev]` | what is playing, with progress and controls |
 | `battery`, `date` | status |
+| `screen` | how long the phone was in use, and how often it was unlocked, each day of the last week |
 | `cal [month] [year]` | a month calendar with today marked |
 | `weather [city]` | the weather now and for five days, for your city or for another one just this once |
 | `weather set <city>`, `weather units [c\|f]` | choose the city `weather` reports, and Celsius or Fahrenheit |
+| `weather login [on\|off]` | show the weather in the login summary, or leave it out |
 | `fetch` | a system card: Android version, device, uptime, apps, battery, storage |
 | `theme [name]` | `default`, `green`, `amber`, `eink`, `nord`, `gruvbox`, `dracula`, `solarized`, `synthwave` or `paper` |
 | `saver [name]` | the lock screen's screensaver: `rain`, `stars`, `life`, `clock`, `shuffle` or `off`; `saver show` previews it |
@@ -59,7 +61,8 @@ The terminal behaves like an old machine:
 - **Waking** opens the screen from a bright line and prints a short boot log above the password
   prompt. `lock` collapses the screen to a dot.
 - **A right password** resolves "access granted" out of noise while the clock breaks apart, then
-  the login summary prints: how far through the day, week and year you are, what is waiting, and a tip.
+  the login summary prints: how far through the day, week and year you are, the weather in your
+  city, how long you have been on the phone today, what is waiting, and a tip.
 - **Output** prints line by line, `ls` fills in as a wave, and opening an app grows its line until
   it fills the screen.
 - **Notifications** that arrive while the terminal is open type themselves above the prompt, and
@@ -121,11 +124,37 @@ shows another city once and leaves yours alone.
 - **Units:** `weather units c` or `weather units f`. Until one is chosen they follow the phone's
   region.
 - **An app called weather:** `open weather` still opens it.
+- **At login:** once a city is set, the login summary has one line of it: the weather now, today's
+  high and low, and the chance of rain or snow when that is 30% or more. Tapping the line runs
+  `weather`. It never holds the prompt up: the line reads `weather …` until the answer is in.
+  `weather login off` leaves it out.
 
 Forecasts come from [Open-Meteo](https://open-meteo.com), which needs no account. Two things are
-sent, and only when you run `weather`: the city's name, to find it, and the city's position, to
-get its forecast. The phone's own location is never read. A forecast is reused for ten minutes
-before a new one is asked for.
+sent: the city's name, to find it, and the city's position, to get its forecast. The name is sent
+only when you run `weather` with a city. The position is sent when you run `weather`, and when the
+login summary prints, unless the forecast it has is recent: ten minutes for the command, half an
+hour for the summary. So with a city set, unlocking the phone can ask Open-Meteo for a forecast,
+at most twice an hour; `weather login off` stops that. The phone's own location is never read.
+
+## Screen time
+
+`screen` shows, for each of the last seven days, how long the phone was in use and how many times
+it was unlocked, with the average of the whole days. The login summary has today's two numbers,
+so they are in front of you every time you unlock.
+
+- **Turning it on:** `setup usage` opens Android's "usage access" switch for the launcher. Until
+  that is on, `screen` says how to turn it on and the summary has no such line.
+- **What counts:** the phone is in use while its screen is on and Android's lock screen is down.
+  A look at the lock screen, or at the terminal's password page on top of it, counts for nothing.
+  An unlock is each time the phone goes from that to being in use.
+- **With Android's lock set to None** there is no lock screen to go by. Every time the screen
+  turns on is then an unlock, and time on the terminal's password page counts as use.
+- **Where the numbers come from:** Android's own usage log, the one its Digital Wellbeing page is
+  drawn from. Android writes it whether or not the launcher is running, so nothing is missed while
+  another app is open or after the launcher restarts. It is read on the phone and sent nowhere.
+- **Its limits:** `screen` shows as many of the seven days as Android still holds. A phone that
+  dies without shutting down loses the last minutes of its log, up to about twenty. Where the log
+  has such a hole the launcher counts less, not more. Android 8 keeps no such log.
 
 ## The lock
 
@@ -164,6 +193,7 @@ Jetpack Compose: `ui/TerminalScreen.kt` is the screen, `ui/Rows.kt` draws each k
 SSH follows the same split: `shell/Remote.kt` is what the shell asks for and how a remote shell's
 output becomes lines, and `AndroidSsh.kt` provides it with the JSch library. So does the weather:
 `shell/Weather.kt` is what the shell asks for, and `OpenMeteo.kt` fetches and reads it.
+`shell/ScreenTime.kt` adds Android's log of the screen and the lock up into days of use.
 `demo/index.html` is the original browser mock-up.
 
 ## Release

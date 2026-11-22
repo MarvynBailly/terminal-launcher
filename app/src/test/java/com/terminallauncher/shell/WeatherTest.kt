@@ -377,6 +377,207 @@ class WeatherTest {
         assertEquals(PromptKind.SHELL, s.prompt?.kind)
     }
 
+    /* ---------- in the login summary ---------- */
+
+    /** A terminal with a password whose city is Berlin, locked again as it is when the phone is picked up. */
+    private fun lockedWithACity(): Shell {
+        vault.password = "pw"
+        val s = shell()
+        s.submit("pw")
+        s.submit("weather set berlin")
+        weather.found!!(listOf(berlin), null)
+        weather.told!!(cold, null)
+        s.lock()
+        s.wake()
+        return s
+    }
+
+    private fun Shell.relock() {
+        lock()
+        wake()
+    }
+
+    /** The summary's weather line, which is the only one a tap on which runs plain `weather`. */
+    private fun Shell.weatherLine(): TextLine? =
+        lines.filterIsInstance<TextLine>().firstOrNull { line -> line.spans.any { it.run == "weather" } }
+
+    @Test fun theLoginSummaryHasTheWeather() {
+        val s = lockedWithACity()
+        time += 20 * 60_000
+        s.submit("pw")
+        val rows = s.rows()
+        val at = rows.indexOf("5°C overcast · 6°/2° · rain 88%")
+        assertTrue(s.text(), at >= 0)
+        assertEquals("above what is waiting", "2 new · wifi · torch off", rows[at + 1])
+        assertEquals("a forecast this recent is not asked for again", 1, weather.asked.size)
+        assertTrue("a tap anywhere on it runs weather", (s.lines[at] as TextLine).spans.all { it.run == "weather" })
+        assertEquals(PromptKind.SHELL, s.prompt?.kind)
+    }
+
+    @Test fun anOlderForecastIsAskedForAgainWithoutHoldingThePromptUp() {
+        val s = lockedWithACity()
+        time += 31 * 60_000
+        s.submit("pw")
+        assertEquals(listOf(berlin to false, berlin to false), weather.asked)
+        val at = s.rows().indexOf("weather …")
+        assertTrue(s.text(), at >= 0)
+        assertEquals("the prompt is there at once", PromptKind.SHELL, s.prompt?.kind)
+        assertFalse("and there is nothing to cancel", "cancel" in s.chips("").orEmpty())
+
+        val rows = s.rows().size
+        s.submit("date")
+        assertTrue("a command runs while the answer is on its way", s.rows().size > rows)
+
+        val ids = s.lineIds
+        val before = changes
+        weather.told!!(cold, null)
+        assertEquals("5°C overcast · 6°/2° · rain 88%", s.rows()[at])
+        assertEquals("it is the same line filled in, and nothing moved", ids, s.lineIds)
+        assertFalse("weather …" in s.rows())
+        assertTrue("the screen is told", changes > before)
+
+        s.submit("weather")
+        assertEquals("the forecast it fetched serves the command too", 2, weather.asked.size)
+        assertTrue("5°C  overcast" in s.rows())
+    }
+
+    @Test fun withNoAnswerTheSummarySaysSoQuietly() {
+        val s = lockedWithACity()
+        time += 60 * 60_000
+        s.submit("pw")
+        val at = s.rows().indexOf("weather …")
+        weather.told!!(null, "could not reach open-meteo.com. Is the phone online?")
+        assertEquals("weather unavailable", s.rows()[at])
+        val span = (s.lines[at] as TextLine).spans.single()
+        assertEquals(Style.DIM, span.style)
+        assertEquals("a tap asks again, and that says why", "weather", span.run)
+        assertEquals(PromptKind.SHELL, s.prompt?.kind)
+
+        s.relock()
+        s.submit("pw")
+        assertEquals("the next login asks again", 3, weather.asked.size)
+    }
+
+    @Test fun anAnswerThatComesAfterThePageWasClearedShowsNothing() {
+        val s = lockedWithACity()
+        time += 60 * 60_000
+        s.submit("pw")
+        val tell = weather.told!!
+        s.clear()
+        val before = changes
+        tell(cold, null)
+        assertEquals(emptyList<String>(), s.rows())
+        assertEquals("nothing changed, so nothing is redrawn", before, changes)
+
+        s.relock()
+        s.submit("pw")
+        assertTrue("but it is kept for the next login", "5°C overcast · 6°/2° · rain 88%" in s.rows())
+        assertEquals(2, weather.asked.size)
+    }
+
+    @Test fun anAnswerThatComesAfterTheTerminalLockedStaysOffTheLockScreen() {
+        val s = lockedWithACity()
+        time += 60 * 60_000
+        s.submit("pw")
+        val tell = weather.told!!
+        s.relock()
+        val rows = s.rows()
+        tell(cold, null)
+        assertEquals(rows, s.rows())
+        assertTrue(s.locked)
+        assertEquals(PromptKind.LOGIN, s.prompt?.kind)
+    }
+
+    @Test fun withNoCityTheSummaryAsksNothing() {
+        vault.password = "pw"
+        store.map["seen"] = "1"
+        val s = shell()
+        s.submit("pw")
+        assertTrue("the summary printed", s.rows().any { it.startsWith("tip: ") })
+        assertNull(s.weatherLine())
+        assertTrue(weather.asked.isEmpty() && weather.searches.isEmpty())
+    }
+
+    @Test fun theWeatherCanBeKeptOutOfTheSummary() {
+        val s = lockedWithACity()
+        s.submit("pw")
+        s.submit("weather login")
+        val words = s.lines.filterIsInstance<TextLine>().last().spans.filter { it.run != null }
+        assertEquals(listOf("[on]", "off"), words.map { it.text })
+        assertEquals("weather login off", words[1].run)
+
+        s.submit("weather login off")
+        assertEquals("weather at login off", s.rows().last())
+        time += 60 * 60_000
+        s.relock()
+        s.submit("pw")
+        assertTrue("the summary printed", s.rows().any { it.startsWith("tip: ") })
+        assertNull(s.weatherLine())
+        assertEquals("and nothing was asked", 1, weather.asked.size)
+
+        s.submit("weather login on")
+        assertEquals("weather at login on", s.rows().last())
+        s.relock()
+        s.submit("pw")
+        assertTrue("weather …" in s.rows())
+        assertEquals(2, weather.asked.size)
+
+        s.submit("weather login sometimes")
+        assertEquals("usage: weather login [on|off]", s.rows().last())
+    }
+
+    @Test fun theSummaryLineLeavesOffWhatDoesNotFit() {
+        val s = lockedWithACity()
+        s.columns = 24
+        s.submit("pw")
+        assertTrue(s.text(), "5°C overcast · 6°/2°" in s.rows())
+        s.relock()
+        s.columns = 14
+        s.submit("pw")
+        assertTrue(s.text(), "5°C overcast" in s.rows())
+    }
+
+    @Test fun theSummaryMentionsRainOrSnowOnlyWhenItIsLikely() {
+        val s = lockedWithACity()
+        time += 60 * 60_000
+        s.submit("pw")
+        weather.told!!(cold.copy(days = listOf(DayForecast("2026-11-18", 3, 5.6, 2.1, 29))), null)
+        assertTrue(s.text(), "5°C overcast · 6°/2°" in s.rows())
+
+        time += 60 * 60_000
+        s.relock()
+        s.submit("pw")
+        weather.told!!(cold.copy(temperature = -2.6, code = 73, days = listOf(DayForecast("2026-11-18", 75, -1.2, -7.8, 30))), null)
+        assertTrue(s.text(), "-3°C snow · -1°/-8° · snow 30%" in s.rows())
+
+        time += 60 * 60_000
+        s.relock()
+        s.submit("pw")
+        weather.told!!(cold.copy(days = emptyList()), null)
+        assertTrue("with no days there is only now", "5°C overcast" in s.rows())
+    }
+
+    @Test fun theSummaryUsesTheChosenUnits() {
+        val s = lockedWithACity()
+        s.submit("pw")
+        s.submit("weather units f")
+        s.relock()
+        s.submit("pw")
+        assertEquals("the forecast in the other units is not reused", berlin to true, weather.asked.last())
+        weather.told!!(cold.copy(temperature = 41.7, days = listOf(DayForecast("2026-11-18", 80, 42.1, 35.8, 88))), null)
+        assertTrue(s.text(), "42°F overcast · 42°/36° · rain 88%" in s.rows())
+    }
+
+    @Test fun withNoPasswordTheSummaryAtStartHasItToo() {
+        settled()
+        val s = shell()                 // the app starting again, with what the last one saved
+        assertEquals(2, weather.asked.size)
+        val at = s.rows().indexOf("weather …")
+        assertTrue(s.text(), at >= 0)
+        weather.told!!(cold, null)
+        assertEquals("5°C overcast · 6°/2° · rain 88%", s.rows()[at])
+    }
+
     /* ---------- units ---------- */
 
     @Test fun unitsFollowThePhonesRegionUntilOneIsChosen() {
@@ -412,9 +613,10 @@ class WeatherTest {
         val s = settled()
         s.submit("weather set")
         assertEquals("usage: weather set <city>", s.rows().last())
-        assertEquals(listOf("set", "units"), s.chips("weather "))
+        assertEquals(listOf("set", "units", "login"), s.chips("weather "))
         assertEquals(listOf("units"), s.chips("weather u"))
         assertEquals(listOf("c", "f"), s.chips("weather units "))
+        assertEquals(listOf("on", "off"), s.chips("weather login "))
         assertEquals(emptyList<String>(), s.chips("weather set ber"))
         assertTrue("weather" in s.chips("wea")!!)
     }

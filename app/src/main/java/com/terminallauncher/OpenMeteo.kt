@@ -22,9 +22,10 @@ import kotlin.concurrent.thread
 /**
  * Forecasts from open-meteo.com, which needs no account or key.
  *
- * Two things leave the phone, and only when `weather` is run: the name of a city, to find where it
- * is, and that city's position, rounded to about a kilometre, to get its forecast. Nothing says
- * who is asking.
+ * Two things leave the phone: the name of a city, to find where it is, and that city's position,
+ * rounded to about a kilometre, to get its forecast. The name goes only when `weather` is run with
+ * one. The position goes when `weather` is run, and when the login summary prints its line of
+ * weather. Nothing says who is asking.
  */
 class OpenMeteo : Weather {
     override val source = HOST
