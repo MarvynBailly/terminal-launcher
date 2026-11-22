@@ -431,8 +431,139 @@ class ScreenCommandTest {
         assertEquals("what arrives after a cancel is dropped", rows, s.rows())
 
         s.submit("screen now")
-        assertEquals("usage: screen", s.rows().last())
+        assertEquals("usage: screen [budget <time>|off]", s.rows().last())
         assertTrue("screen" in s.chips("scr")!!)
+    }
+
+    /* ---------- a daily budget ---------- */
+
+    @Test fun aBudgetIsSetShownAndRemoved() {
+        val s = shell()
+        s.submit("screen budget")
+        assertTrue("No daily budget is set. Set one:" in s.rows())
+        assertEquals("screen budget ", (s.lines.last() as TextLine).spans.first().fill)
+
+        s.submit("screen budget 2h")
+        assertEquals("daily budget: 2h", s.rows().last())
+        assertEquals("120", store.get("screen_budget"))
+
+        s.submit("screen budget")
+        val rows = s.rows()
+        assertEquals("daily budget: 2h", rows[rows.size - 2])
+        assertEquals("screen budget off", (s.lines.last() as TextLine).spans.last().run)
+
+        s.submit("screen budget off")
+        assertEquals("no daily budget", s.rows().last())
+        assertNull(store.get("screen_budget"))
+
+        assertEquals(listOf("budget"), s.chips("screen "))
+        assertEquals(listOf("1h", "2h", "3h", "4h", "off"), s.chips("screen budget "))
+        assertEquals(listOf("off"), s.chips("screen budget o"))
+    }
+
+    @Test fun aLengthOfTimeCanBeTypedManyWays() {
+        val s = shell()
+        val ways = listOf(
+            Triple("90m", "90", "1h 30m"), Triple("1h30m", "90", "1h 30m"), Triple("1h 30m", "90", "1h 30m"),
+            Triple("1h30", "90", "1h 30m"), Triple("1.5h", "90", "1h 30m"), Triple("1:30", "90", "1h 30m"),
+            Triple("45m", "45", "45m"), Triple("3H", "180", "3h"), Triple("24h", "1440", "24h"),
+        )
+        for ((typed, minutes, shown) in ways) {
+            s.submit("screen budget $typed")
+            assertEquals(typed, minutes, store.get("screen_budget"))
+            assertEquals(typed, "daily budget: $shown", s.rows().last())
+        }
+        s.submit("screen limit 2h")
+        assertEquals("limit is another word for it", "120", store.get("screen_budget"))
+
+        for (bad in listOf("2", "soon", "h", "2x", "-1h", "1h2h")) {
+            s.submit("screen budget $bad")
+            assertEquals("screen: '$bad' is not a length of time. Try 2h or 90m", s.rows().last())
+        }
+        for (tooMuch in listOf("25h", "0m", "9999m")) {
+            s.submit("screen budget $tooMuch")
+            assertEquals(tooMuch, "screen: a budget is from 1m to 24h", s.rows().last())
+        }
+        assertEquals("the last good one stands", "120", store.get("screen_budget"))
+    }
+
+    @Test fun aBudgetSetBeforeUsageAccessSaysWhatIsMissing() {
+        phone.usageAccess = false
+        val s = shell()
+        s.submit("screen budget 2h")
+        val rows = s.rows()
+        assertEquals("daily budget: 2h", rows[rows.size - 3])
+        assertEquals("screen: usage access is off, so nothing is measured yet", rows[rows.size - 2])
+        assertEquals("setup usage", (s.lines.last() as TextLine).spans.last().run)
+    }
+
+    @Test fun withABudgetEachDayIsMeasuredAgainstIt() {
+        store.map["screen_budget"] = "120"
+        val s = shell()
+        s.submit("screen")
+        phone.logRead!!(log(week + inHand(5 * minute)))
+        assertEquals(
+            listOf(
+                Gauge("thu", 50, "  1h 0m    1"),
+                Gauge("fri", 100, "  2h 0m    3"),                  // the budget to the minute is not over it
+                Gauge("sat", 0, "     0m    0"),
+                Gauge("sun", 37, "    45m    1"),
+                Gauge("mon", 100, "  3h 0m    2", alert = true),
+                Gauge("tue", 12, "    15m    1"),
+                Gauge("today", 33, "    40m    3"),
+            ),
+            s.lines.filterIsInstance<Gauge>(),
+        )
+        val rows = s.rows()
+        assertEquals("average: 1h 10m on screen, 1 unlock a day", rows[rows.size - 2])
+        assertEquals("budget 2h a day · 1h 20m left today", rows.last())
+        assertEquals(Style.DIM, (s.lines.last() as TextLine).spans.single().style)
+
+        s.submit("screen budget 30m")
+        s.submit("screen")
+        phone.logRead!!(log(week + inHand(5 * minute)))
+        assertEquals("budget 30m a day · 10m over today", s.rows().last())
+        assertEquals(Style.ERR, (s.lines.last() as TextLine).spans.single().style)
+        assertEquals(Gauge("today", 100, "    40m    3", alert = true), s.lines.filterIsInstance<Gauge>().last())
+    }
+
+    @Test fun withABudgetTheLoginSummaryHasABarForIt() {
+        store.map["screen_budget"] = "60"
+        val s = loggedIn()
+        assertEquals(listOf("day", "week", "year", "phone"), s.lines.filterIsInstance<Gauge>().map { it.label })
+        assertEquals("empty until the log has been read", Gauge("phone", 0, "…"), s.lines.filterIsInstance<Gauge>().last())
+        val at = s.rows().indexOf("screen time …")
+        assertEquals(PromptKind.SHELL, s.prompt?.kind)
+
+        val ids = s.lineIds
+        phone.logRead!!(log(today + inHand(2000)))
+        assertEquals(Gauge("phone", 58, "35m of 1h"), s.lines.filterIsInstance<Gauge>().last())
+        assertEquals("the line below has the unlocks alone", "3 unlocks today", s.rows()[at])
+        assertTrue((s.lines[at] as TextLine).spans.all { it.run == "screen" })
+        assertEquals("both were filled in where they stood", ids, s.lineIds)
+    }
+
+    @Test fun overBudgetTheBarIsFullAndWarns() {
+        store.map["screen_budget"] = "30"
+        val s = loggedIn()
+        phone.logRead!!(log(today + inHand(2000)))
+        assertEquals(Gauge("phone", 100, "35m of 30m", alert = true), s.lines.filterIsInstance<Gauge>().last())
+    }
+
+    @Test fun aBudgetBarWithNothingToShow() {
+        store.map["screen_budget"] = "60"
+        val s = loggedIn()
+        phone.logRead!!(null)
+        assertEquals(Gauge("phone", 0, "no reading"), s.lines.filterIsInstance<Gauge>().last())
+        assertTrue("screen time unavailable" in s.rows())
+    }
+
+    @Test fun withoutUsageAccessABudgetAddsNoBar() {
+        store.map["screen_budget"] = "60"
+        phone.usageAccess = false
+        val s = loggedIn()
+        assertEquals(listOf("day", "week", "year"), s.lines.filterIsInstance<Gauge>().map { it.label })
+        assertTrue(phone.logAsked.isEmpty())
     }
 
     /* ---------- the login summary ---------- */

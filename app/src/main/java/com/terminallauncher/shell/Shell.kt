@@ -64,6 +64,7 @@ class Shell(
         private const val KEY_UNITS = "weather_units"      // c or f; unset follows the phone's region
 
         private const val KEY_AT_LOGIN = "weather_login"   // off keeps the weather out of the login summary
+        private const val KEY_SCREEN_BUDGET = "screen_budget"   // minutes of screen time meant to be enough for a day
 
         /** A forecast this fresh is shown again without asking for a new one. */
         private const val FORECAST_FRESH_MS = 10 * 60_000L
@@ -104,6 +105,7 @@ class Shell(
             "ssh user@host logs in to a computer",
             "weather prints the forecast",
             "screen shows your time on the phone",
+            "screen budget 2h sets a daily budget",
         )
         private val SHELL_PROMPT = Prompt("$ ", PromptKind.SHELL)
         private val LOGIN_PROMPT = Prompt("password: ", PromptKind.LOGIN, mask = true)
@@ -438,6 +440,11 @@ class Shell(
                 else -> none
             }
             word == "ssh-copy-id" -> if (firstArg) lastWord(hosts()) else none
+            word == "screen" -> when {
+                firstArg -> lastWord(listOf("budget"))
+                arg.startsWith("budget ") || arg.startsWith("limit ") -> lastWord(listOf("1h", "2h", "3h", "4h", "off"))
+                else -> none
+            }
             word == "weather" -> when {
                 firstArg -> lastWord(listOf("set", "units", "login"))
                 arg.startsWith("units ") -> lastWord(listOf("c", "f"))
@@ -701,10 +708,17 @@ class Shell(
         add(Gauge("day", Fmt.dayPercent(t), "${Fmt.dayPercent(t)}%"))
         add(Gauge("week", Fmt.weekPercent(t), Fmt.weekday(t).lowercase()))
         add(Gauge("year", Fmt.yearPercent(t), "${Fmt.yearPercent(t)}%"))
+        // With a budget set, the day's screen time is a fourth bar. It is filled in when the log has been read.
+        val tracked = usageAccess() == true
+        val budget = if (tracked) screenBudget() else null
+        val bar = budget?.let {
+            add(Gauge("phone", 0, "…"))
+            nextId - 1
+        }
         print()
 
         loginWeather()
-        loginScreenTime()
+        if (tracked) loginScreenTime(bar, budget)
         val status = ArrayList<Span>()
         phone.notifications()?.let {
             status += if (it.isEmpty()) Span("nothing new", Style.DIM) else Span("${it.size} new", Style.APP, "notifs")
@@ -1431,10 +1445,13 @@ class Shell(
         val all = tallyScreen(log, days, now())
         // Only the days the log reaches. Today is always one of them.
         val shown = all.filterIndexed { i, _ -> i == all.lastIndex || days[i + 1] > log.since }
-        val most = shown.maxOf { it.screenMs }.coerceAtLeast(1)
+        // A full bar is the budget if there is one, and otherwise the longest of the days.
+        val budget = screenBudget()?.let { it * 60_000L }
+        val full = budget ?: shown.maxOf { it.screenMs }.coerceAtLeast(1)
         shown.forEachIndexed { i, day ->
             val label = if (i == shown.lastIndex) "today" else Fmt.weekday(day.start).lowercase()
-            add(Gauge(label, (day.screenMs * 100 / most).toInt(), onScreen(day.screenMs).padStart(7) + day.unlocks.toString().padStart(5)))
+            val note = onScreen(day.screenMs).padStart(7) + day.unlocks.toString().padStart(5)
+            add(Gauge(label, (day.screenMs * 100 / full).toInt().coerceAtMost(100), note, alert = budget != null && day.screenMs > budget))
         }
         // An average needs whole days: not today, and not the day the log starts part way through.
         val whole = shown.dropLast(1).filter { it.start >= log.since }
@@ -1444,31 +1461,95 @@ class Shell(
             val unlocks = (whole.sumOf { it.unlocks } + whole.size / 2) / whole.size
             print("average: ${onScreen(time)} on screen, ${unlockCount(unlocks)} a day", Style.DIM)
         }
+        if (budget != null) {
+            val today = shown.last().screenMs
+            val every = "budget ${tidy((budget / 60_000).toInt())} a day"
+            if (today > budget) print("$every · ${onScreen(today - budget)} over today", Style.ERR)
+            else print("$every · ${onScreen(budget - today)} left today", Style.DIM)
+        }
     }
 
     private fun unlockCount(n: Int): String = if (n == 1) "1 unlock" else "$n unlocks"
 
+    /** Minutes as a round figure reads: 2h, 45m, 1h 30m. */
+    private fun tidy(minutes: Int): String = if (minutes % 60 == 0) "${minutes / 60}h" else Fmt.span(minutes.toLong())
+
+    /** The screen time meant to be enough for a day, in minutes, or null if none is set. */
+    private fun screenBudget(): Int? = store.get(KEY_SCREEN_BUDGET)?.toIntOrNull()?.takeIf { it in 1..24 * 60 }
+
+    /** A length of time as it is typed: 2h, 90m, 1h30m, 1.5h or 1:30. A bare number could be either, so it is neither. */
+    private fun minutesOf(typed: String): Int? {
+        val text = typed.lowercase().replace(" ", "")
+        Regex("^(\\d{1,2}):(\\d{2})$").find(text)?.let { return it.groupValues[1].toInt() * 60 + it.groupValues[2].toInt() }
+        val parts = Regex("^(?:(\\d{1,2}(?:\\.\\d{1,2})?)h)?(?:(\\d{1,4})m?)?$").find(text) ?: return null
+        val hours = parts.groupValues[1]
+        val minutes = parts.groupValues[2]
+        if (hours.isEmpty() && (minutes.isEmpty() || !text.endsWith("m"))) return null
+        return ((hours.toDoubleOrNull() ?: 0.0) * 60).roundToInt() + (minutes.toIntOrNull() ?: 0)
+    }
+
+    /** `screen budget`: shows, sets or removes the day's budget. It is a reminder and holds nothing back. */
+    private fun setScreenBudget(words: List<String>) {
+        val typed = words.joinToString(" ")
+        val budget = screenBudget()
+        when {
+            typed.isEmpty() && budget != null -> {
+                print("daily budget: ${tidy(budget)}")
+                row(Span("remove it: ", Style.DIM), Span("screen budget off", Style.APP, "screen budget off"))
+            }
+            typed.isEmpty() -> {
+                print("No daily budget is set. Set one:", Style.DIM)
+                row(Span("screen budget ", Style.APP, fill = "screen budget "), Span("2h", Style.DIM))
+            }
+            typed.lowercase() == "off" || typed.lowercase() == "none" -> {
+                store.put(KEY_SCREEN_BUDGET, null)
+                print("no daily budget")
+            }
+            else -> {
+                val minutes = minutesOf(typed)
+                if (minutes == null) print("screen: '$typed' is not a length of time. Try 2h or 90m", Style.ERR)
+                else if (minutes !in 1..24 * 60) print("screen: a budget is from 1m to 24h", Style.ERR)
+                else {
+                    store.put(KEY_SCREEN_BUDGET, minutes.toString())
+                    print("daily budget: ${tidy(minutes)}")
+                    if (usageAccess() == false) needs("usage", "screen: usage access is off, so nothing is measured yet")
+                }
+            }
+        }
+    }
+
+    /** A day's screen time against its [budget] in minutes, as a bar that fills up and then warns. */
+    private fun budgetBar(label: String, ms: Long?, budget: Int): Gauge {
+        if (ms == null) return Gauge(label, 0, "no reading")
+        val all = budget * 60_000L
+        return Gauge(label, (ms * 100 / all).toInt().coerceAtMost(100), "${onScreen(ms)} of ${tidy(budget)}", alert = ms > all)
+    }
+
     /**
-     * Today's screen time and unlocks in one line of the login summary. There is no line until the
-     * phone's log may be read. Like the weather's, it is printed as on its way and filled in when
-     * the log has been read, so the prompt does not wait for it.
+     * Today's screen time and unlocks in one line of the login summary. Like the weather's, it is
+     * printed as on its way and filled in when the log has been read, so the prompt does not wait
+     * for it. With a [budget] the time is the bar [bar], up among the day's other bars, and this
+     * line has the unlocks alone.
      */
-    private fun loginScreenTime() {
-        if (usageAccess() != true) return
+    private fun loginScreenTime(bar: Long?, budget: Int?) {
         add(TextLine(listOf(Span("screen time …", Style.DIM, "screen"))))
         val id = nextId - 1
         val today = listOf(dayStart(0))
         phone.screenLog(today[0]) { log ->
-            val line = if (log == null) TextLine(listOf(Span("screen time unavailable", Style.DIM, "screen")))
-            else tallyScreen(log, today, now())[0].let { use ->
-                TextLine(
+            val use = log?.let { tallyScreen(it, today, now())[0] }
+            val line = when {
+                use == null -> TextLine(listOf(Span("screen time unavailable", Style.DIM, "screen")))
+                budget != null -> TextLine(listOf(Span(unlockCount(use.unlocks), Style.APP, "screen"), Span(" today", Style.DIM, "screen")))
+                else -> TextLine(
                     listOf(
                         Span("${onScreen(use.screenMs)} on screen", Style.APP, "screen"),
                         Span(" · ${unlockCount(use.unlocks)}", Style.DIM, "screen"),
                     ),
                 )
             }
-            if (replace(id, line)) onChange()
+            var changed = replace(id, line)
+            if (bar != null && budget != null && replace(bar, budgetBar("phone", use?.screenMs, budget))) changed = true
+            if (changed) onChange()
         }
     }
 
@@ -1625,7 +1706,11 @@ class Shell(
             print("${b.percent}%  ${if (b.charging) "charging" else "on battery"}")
         }
         def("screen", "phone", "screen", "screen time") { args, _ ->
-            if (args.isNotEmpty()) print("usage: screen", Style.ERR) else screenTime()
+            when (args.firstOrNull()?.lowercase()) {
+                null -> screenTime()
+                "budget", "limit" -> setScreenBudget(args.drop(1))
+                else -> print("usage: screen [budget <time>|off]", Style.ERR)
+            }
         }
         def("np", "phone", "np [next|prev]", "now playing") { args, _ ->
             val word = args.firstOrNull()?.lowercase()

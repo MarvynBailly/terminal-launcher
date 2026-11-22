@@ -33,6 +33,7 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `np [pause\|play\|next\|prev]` | what is playing, with progress and controls |
 | `battery`, `date` | status |
 | `screen` | how long the phone was in use, and how often it was unlocked, each day of the last week |
+| `screen budget [time\|off]` | set a daily budget of screen time, such as `2h` or `90m`, or remove it |
 | `cal [month] [year]` | a month calendar with today marked |
 | `weather [city]` | the weather now and for five days, for your city or for another one just this once |
 | `weather set <city>`, `weather units [c\|f]` | choose the city `weather` reports, and Celsius or Fahrenheit |
@@ -147,6 +148,11 @@ so they are in front of you every time you unlock.
 - **What counts:** the phone is in use while its screen is on and Android's lock screen is down.
   A look at the lock screen, or at the terminal's password page on top of it, counts for nothing.
   An unlock is each time the phone goes from that to being in use.
+- **A daily budget:** `screen budget 2h` sets how much screen time is meant to be enough for a
+  day. The login summary then has a fourth bar, `phone`, under the day's, week's and year's. It
+  fills as the day's time is used and turns red once the budget is spent. `screen` measures each
+  day's bar against the budget, marks the days that went over, and says how much of today is
+  left. It is a reminder: nothing is blocked. `screen budget off` removes it.
 - **With Android's lock set to None** there is no lock screen to go by. Every time the screen
   turns on is then an unlock, and time on the terminal's password page counts as use.
 - **Where the numbers come from:** Android's own usage log, the one its Digital Wellbeing page is

@@ -317,7 +317,7 @@ private fun GaugeRowView(row: GaugeRow, env: RowEnv) {
             val step = (cellWidth + gap).toPx()
             for (i in 0 until GAUGE_CELLS) {
                 drawRect(
-                    color = if (i < filled) palette.fg else palette.line,
+                    color = if (i >= filled) palette.line else if (gauge.alert) palette.err else palette.fg,
                     topLeft = Offset(i * step, 0f),
                     size = Size(cellWidth.toPx(), size.height),
                 )
@@ -325,7 +325,7 @@ private fun GaugeRowView(row: GaugeRow, env: RowEnv) {
         }
         BasicText(
             text = " " + gauge.note,
-            style = env.base.copy(color = palette.dim),
+            style = env.base.copy(color = if (gauge.alert) palette.err else palette.dim),
             modifier = Modifier.graphicsLayer { alpha = if (time.value >= minOf(fillMs, (target + 1) * GAUGE_CELL_MS)) 1f else 0f },
         )
     }

@@ -27,8 +27,12 @@ object LockHeader : Line
 /** Shown while the lock screen refuses input after repeated wrong passwords. */
 data class Lockout(val until: Long) : Line
 
-/** A labelled bar filled to [percent], with [note] after it. The login summary prints three. */
-data class Gauge(val label: String, val percent: Int, val note: String) : Line
+/**
+ * A labelled bar filled to [percent], with [note] after it. The login summary prints three, and a
+ * fourth for the day's screen time if a budget is set. With [alert] the bar is drawn as a warning:
+ * the budget is spent.
+ */
+data class Gauge(val label: String, val percent: Int, val note: String, val alert: Boolean = false) : Line
 
 /** The `fetch` card. The UI draws a logo beside [rows]. */
 data class Fetch(val rows: List<TextLine>) : Line
