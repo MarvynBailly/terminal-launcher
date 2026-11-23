@@ -1,0 +1,288 @@
+/*
+ * Blueprint: an engineer's cyanotype. A Prussian blue sheet with a square grid and a drafting
+ * border, white linework, pencil yellow for the notes and red pencil for what is wrong.
+ * Everything is drawn the way a plotter would draw it: straight, exact, unhurried.
+ */
+.tl[data-look="blueprint"] {
+  --bg: #0d3769; --fg: #eef5ff; --dim: #8fb5e0; --line: #3f6ca6;
+  --accent: #ffd166; --app: #86e1f5; --ok: #a8ecb9; --err: #ff7d6e;
+  --font: "Share Tech Mono", ui-monospace, "Cascadia Mono", "Roboto Mono", Consolas, Menlo, monospace;
+  --weight: 400; --lh: 1.5; --pad: 6.4cqw;
+  --hair: max(1px, 0.25cqw);                 /* a thin pen */
+  --bold: max(1px, 0.5cqw);                  /* the border pen */
+  --ink: rgba(214, 233, 255, 0.55);          /* secondary linework */
+  --faint: rgba(170, 208, 255, 0.3);         /* construction lines */
+  --fx: 3cqw; --fy: 3.05cqw;                 /* the border's inset: 25 by 56 grid cells inside */
+  --hatch: repeating-linear-gradient(135deg, currentColor 0 var(--hair), transparent calc(var(--hair) + 0.02em) 0.25em);
+  background: #040c19;                       /* the desk under the sheet */
+}
+
+/* ---------------- the sheet: paper, grid, border, registration marks ---------------- */
+
+.tl[data-look="blueprint"] .bp-sheet { position: absolute; inset: 0; }
+.tl[data-look="blueprint"][data-scene="off"] .bp-sheet { visibility: hidden; }
+.tl[data-look="blueprint"] .bp-sheet i { position: absolute; display: block; }
+.tl[data-look="blueprint"] .bp-paper {
+  inset: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .8 0 0 0 0 .9 0 0 0 0 1 0 0 0 .3 -.1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 51cqw 51cqw,
+    radial-gradient(130% 78% at 50% 36%, #134886 0, #0d3769 56%, #08274d 100%);
+}
+/* the grid and the zone ticks outside the border are drawn on a canvas, snapped to the screen's pixels */
+.tl[data-look="blueprint"] .bp-grid { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tl[data-look="blueprint"] .bp-frame { position: absolute; inset: var(--fy) var(--fx); }
+.tl[data-look="blueprint"] .bp-edge { background: var(--fg); }
+.tl[data-look="blueprint"] .bp-et { top: 0; left: 0; right: 0; height: var(--bold); transform-origin: 0 50%; }
+.tl[data-look="blueprint"] .bp-er { top: 0; right: 0; bottom: 0; width: var(--bold); transform-origin: 50% 0; }
+.tl[data-look="blueprint"] .bp-eb { bottom: 0; left: 0; right: 0; height: var(--bold); transform-origin: 100% 50%; }
+.tl[data-look="blueprint"] .bp-el { top: 0; left: 0; bottom: 0; width: var(--bold); transform-origin: 50% 100%; }
+/* a registration mark on each corner: a circle on crossed lines that run past the border */
+.tl[data-look="blueprint"] .bp-reg {
+  width: 4.4cqw; height: 4.4cqw; margin: -2.2cqw;
+  background:
+    linear-gradient(var(--ink), var(--ink)) 50% 50% / 100% var(--hair) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 50% 50% / var(--hair) 100% no-repeat;
+}
+.tl[data-look="blueprint"] .bp-reg::before { content: ""; position: absolute; inset: 1.1cqw; border: var(--hair) solid var(--fg); border-radius: 50%; }
+.tl[data-look="blueprint"] .bp-r0 { left: 0; top: 0; }
+.tl[data-look="blueprint"] .bp-r1 { left: 100%; top: 0; }
+.tl[data-look="blueprint"] .bp-r2 { left: 100%; top: 100%; }
+.tl[data-look="blueprint"] .bp-r3 { left: 0; top: 100%; }
+
+/* the sheet on top of the stack while it is pulled away, and the shade it leaves on the next one */
+.tl[data-look="blueprint"] .bp-top { box-shadow: 0 0 9cqw 1.5cqw rgba(0, 5, 18, 0.7); }
+.tl[data-look="blueprint"] .bp-shade { position: absolute; inset: 0; background: #02080f; }
+
+/* ---------------- the terminal, lettered on the sheet ---------------- */
+
+.tl[data-look="blueprint"] .tl-screen { padding: var(--fy) var(--pad) var(--fy); }
+
+/* the status line is the title strip under the top border */
+.tl[data-look="blueprint"] .tl-status {
+  align-items: stretch; margin-inline: calc(var(--fx) - var(--pad)); padding: 0;
+  border-bottom: var(--hair) solid var(--ink);
+  font-size: 0.8em; letter-spacing: 0.07em; text-transform: uppercase; color: var(--dim);
+}
+.tl[data-look="blueprint"] .tl-status-l { padding: 0.75em 0 0.5em calc(var(--pad) - var(--fx)); }
+.tl[data-look="blueprint"] .tl-status-r { padding: 0.75em calc(var(--pad) - var(--fx)) 0.5em 2.4cqw; border-left: var(--hair) solid var(--ink); }
+/* the scrollback runs under the strip and fades out just below it */
+.tl[data-look="blueprint"] .tl-lines { margin-inline: calc(var(--fx) - var(--pad)); padding: 0.75em calc(var(--pad) - var(--fx)) 0; mask-image: linear-gradient(to bottom, transparent 0.1em, #000 0.85em); }
+
+.tl[data-look="blueprint"] .tl-line { position: relative; }
+
+/* a line as it arrives: plotted. The text is revealed just behind the pen, on a baseline that then fades. */
+.tl[data-look="blueprint"] .tl-line.tl-in { animation: blueprint-plot var(--dur, 0.3s) linear var(--dl, 0s) backwards; }
+.tl[data-look="blueprint"] .tl-line.is-blank { animation: none; }
+@keyframes blueprint-plot {
+  from { clip-path: inset(-2.2em 110% -0.25em -0.6em); }
+  0.5% { clip-path: inset(-2.2em calc(100% - 0.55em) -0.25em -0.6em); }
+  to { clip-path: inset(-2.2em calc(100% - var(--w, 100%) - 0.55em) -0.25em -0.6em); }
+}
+.tl[data-look="blueprint"] .tl-text.tl-in::before,
+.tl[data-look="blueprint"] .tl-launch.tl-in::before {
+  content: ""; position: absolute; left: 0; bottom: 0.2em; width: var(--w, 100%); height: var(--hair);
+  background: var(--ink); opacity: 0;
+  animation: blueprint-base calc(var(--dur, 0.3s) + 0.5s) linear var(--dl, 0s) backwards;
+}
+@keyframes blueprint-base { from { opacity: 0.9; } 50% { opacity: 0.9; } to { opacity: 0; } }
+/* the pen: also an element (.bp-pen) put on a line while it is taken up again */
+.tl[data-look="blueprint"] .tl-text.tl-in::after,
+.tl[data-look="blueprint"] .tl-launch.tl-in::after,
+.tl[data-look="blueprint"] .bp-pen {
+  content: ""; position: absolute; left: 0; top: -0.1em; bottom: 0; width: 0.5em; opacity: 0;
+  background:
+    radial-gradient(circle at 50% calc(100% - 0.22em), var(--accent) 0 0.15em, transparent 0.17em),
+    linear-gradient(var(--accent), var(--accent)) 50% 0 / var(--hair) calc(100% - 0.22em) no-repeat;
+}
+.tl[data-look="blueprint"] .tl-text.tl-in::after,
+.tl[data-look="blueprint"] .tl-launch.tl-in::after { animation: blueprint-pen var(--dur, 0.3s) linear var(--dl, 0s) backwards; }
+@keyframes blueprint-pen {
+  from { opacity: 0; transform: translateX(0); }
+  3%, 97% { opacity: 1; }
+  to { opacity: 0; transform: translateX(var(--w, 0em)); }
+}
+.tl[data-look="blueprint"] .tl-line.is-blank::before,
+.tl[data-look="blueprint"] .tl-line.is-blank::after { content: none; }
+
+.tl[data-look="blueprint"] .tl-line.is-tap.tl-in::before { bottom: 0.48em; }
+.tl[data-look="blueprint"] .tl-line.is-tap .s-app { border-bottom: var(--hair) dashed rgba(134, 225, 245, 0.5); }
+
+/* ---------------- the lock sheet ---------------- */
+
+/* room is kept above the header for the boot log, so the clock is drawn where it will stay */
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"] { letter-spacing: 0.04em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(1) { margin-top: 10.5em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(2) { margin-top: 9em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(3) { margin-top: 7.5em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(4) { margin-top: 6em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(5) { margin-top: 4.5em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(6) { margin-top: 3em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-title"]:nth-child(7) { margin-top: 1.5em; }
+.tl[data-look="blueprint"] .tl-line[data-role="lock-date"] { font-size: 1.3em; letter-spacing: 0.05em; }
+
+/* the clock: the path of one fat pen, outlined and hatched, in its construction lines */
+.tl[data-look="blueprint"] .tl-clock { padding-block: 1.5em; }
+.tl[data-look="blueprint"] .bp-clock { --u: 1.2em; position: relative; display: block; width: calc(var(--n, 17) * var(--u)); height: calc(5 * var(--u)); }
+.tl[data-look="blueprint"] .bp-num { position: absolute; left: calc(var(--u) * -0.5); top: calc(var(--u) * -0.5); width: calc(100% + var(--u)); height: calc(100% + var(--u)); overflow: visible; }
+.tl[data-look="blueprint"] .bp-num path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.tl[data-look="blueprint"] .bp-num .bp-o { stroke: #fff; stroke-width: 0.8; }
+.tl[data-look="blueprint"] .bp-num .bp-i { stroke: #000; stroke-width: 0.63; }
+.tl[data-look="blueprint"] .bp-num .bp-f { stroke: #fff; stroke-width: 0.63; }
+.tl[data-look="blueprint"] .bp-num .bp-hl { stroke: #fff; stroke-width: 0.045; }
+.tl[data-look="blueprint"] .bp-num .bp-line { fill: var(--fg); }
+.tl[data-look="blueprint"] .bp-num .bp-hatch { opacity: 0.5; }
+.tl[data-look="blueprint"] .bp-cl { position: absolute; display: block; background: var(--faint); }
+.tl[data-look="blueprint"] .bp-h { left: -0.9em; right: -0.9em; top: calc(var(--v) * var(--u)); height: var(--hair); transform-origin: 0 50%; }
+.tl[data-look="blueprint"] .bp-v { top: -0.65em; bottom: -0.65em; left: calc(var(--v) * var(--u)); width: var(--hair); transform-origin: 50% 0; }
+.tl[data-look="blueprint"] .bp-c {
+  background: repeating-linear-gradient(to right, var(--faint) 0 1em, transparent 0 1.22em, var(--faint) 0 1.4em, transparent 0 1.62em);
+}
+
+/* the stamp on a sheet that has been passed */
+.tl[data-look="blueprint"] .tl-line[data-role="granted"] { margin-top: 0.9em; }
+.tl[data-look="blueprint"] .tl-line[data-role="granted"] span {
+  display: inline-block; padding: 0.15em 0.8em; border: 0.14em double var(--ok);
+  letter-spacing: 0.12em; text-transform: uppercase; transform: rotate(-3deg); transform-origin: 0 50%;
+  animation: blueprint-stamp 0.16s cubic-bezier(.3, .7, .3, 1) backwards;
+}
+@keyframes blueprint-stamp { from { opacity: 0; transform: rotate(-3deg) scale(1.5); } }
+
+/* the lines that close on the clock, and the stroke that cancels it */
+.tl[data-look="blueprint"] .bp-over { position: absolute; inset: 0; }
+.tl[data-look="blueprint"] .bp-con { position: absolute; display: block; background: var(--accent); opacity: 0.85; }
+.tl[data-look="blueprint"] .bp-con.bp-ch { left: var(--fx); right: var(--fx); height: var(--hair); }
+.tl[data-look="blueprint"] .bp-con.bp-cv { top: var(--fy); bottom: var(--fy); width: var(--hair); }
+.tl[data-look="blueprint"] .bp-strike {
+  position: absolute; display: block; height: 0.55cqw; margin-top: -0.27cqw; border-radius: 0.3cqw;
+  background: var(--accent); transform: rotate(-7deg);
+}
+
+/* ---------------- gauges: measured bars ---------------- */
+
+.tl[data-look="blueprint"] .tl-line.tl-gauge.tl-in,
+.tl[data-look="blueprint"] .tl-line.tl-grid.tl-in { animation: none; }
+.tl[data-look="blueprint"] .tl-gauge-label { width: 6ch; }
+.tl[data-look="blueprint"] .tl-gauge-bar {
+  position: relative; gap: 0; width: 14ch; height: 1.14em;
+  background:
+    linear-gradient(var(--ink), var(--ink)) 0 0.8em / 100% var(--hair) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 100% 0.8em / var(--hair) 0.34em no-repeat;
+}
+.tl[data-look="blueprint"] .tl-line.tl-gauge .tl-gauge-bar i {
+  align-self: start; margin-top: 0.8em; height: 0.2em;
+  background: none; border-left: var(--hair) solid var(--ink); transform-origin: 50% 0;
+}
+.tl[data-look="blueprint"] .tl-line.tl-gauge .tl-gauge-bar i:nth-child(7n + 1) { height: 0.34em; }
+/* the measured length, hatched */
+.tl[data-look="blueprint"] .tl-gauge-bar::before {
+  content: ""; position: absolute; left: 0; top: 0.22em; height: 0.58em; width: calc(var(--pct) * 1%);
+  border: var(--hair) solid; border-bottom: 0; color: var(--fg); background: var(--hatch);
+}
+/* its end: an extension line with a dimension tick, in pencil */
+.tl[data-look="blueprint"] .tl-gauge-bar::after {
+  content: ""; position: absolute; left: calc(var(--pct) * 1%); top: -0.1em; width: 0.52em; height: 1.24em; margin-left: -0.26em;
+  background:
+    linear-gradient(var(--accent), var(--accent)) 50% 0 / var(--hair) 100% no-repeat,
+    linear-gradient(to top left, transparent calc(50% - var(--hair) * 0.6), var(--accent) 0, var(--accent) calc(50% + var(--hair) * 0.6), transparent 0) 50% 0 / 0.46em 0.46em no-repeat;
+}
+.tl[data-look="blueprint"] .tl-gauge.is-alert .tl-gauge-bar::before { color: var(--err); }
+.tl[data-look="blueprint"] .tl-gauge-note { margin-left: 1.4ch; }
+
+.tl[data-look="blueprint"] .tl-gauge.tl-in .tl-gauge-label { animation: blueprint-wipe 0.16s linear backwards; }
+.tl[data-look="blueprint"] .tl-gauge.tl-in .tl-gauge-bar { animation: blueprint-rule 0.34s linear backwards; }
+.tl[data-look="blueprint"] .tl-line.tl-gauge.tl-in .tl-gauge-bar i { animation: blueprint-tick 0.1s linear backwards; animation-delay: calc(var(--i) * 26ms); }
+.tl[data-look="blueprint"] .tl-gauge.tl-in .tl-gauge-bar::before { animation: blueprint-bar 0.62s cubic-bezier(.4, 0, .15, 1) 0.14s backwards; }
+.tl[data-look="blueprint"] .tl-gauge.tl-in .tl-gauge-bar::after { animation: blueprint-cap 0.62s cubic-bezier(.4, 0, .15, 1) 0.14s backwards; }
+.tl[data-look="blueprint"] .tl-line.tl-gauge.tl-in .tl-gauge-note { animation: blueprint-wipe 0.22s linear 0.62s backwards; }
+@keyframes blueprint-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes blueprint-rule { from { background-size: 0% var(--hair), var(--hair) 0; } }
+@keyframes blueprint-tick { from { transform: scaleY(0); opacity: 0; } }
+@keyframes blueprint-bar { from { width: 0; } }
+@keyframes blueprint-cap { from { left: 0; opacity: 0; } 12% { opacity: 1; } }
+
+/* ---------------- app names: nodes on a rail ---------------- */
+
+.tl[data-look="blueprint"] .tl-app { position: relative; padding-left: 1.7ch; overflow: visible; }
+.tl[data-look="blueprint"] .tl-app::before {
+  content: ""; position: absolute; left: 0.27em; top: 0; bottom: 0; width: var(--hair); margin-left: calc(var(--hair) * -0.5);
+  background: var(--faint); transform-origin: 50% 0;
+}
+.tl[data-look="blueprint"] .tl-app:nth-child(6n + 1)::before { top: 50%; }
+.tl[data-look="blueprint"] .tl-app:nth-child(6n)::before { bottom: 50%; }
+.tl[data-look="blueprint"] .tl-app::after,
+.tl[data-look="blueprint"] .tl-launch-text::before {
+  content: ""; position: absolute; left: 0; top: 50%; width: 0.54em; height: 0.54em; margin-top: -0.27em;
+  border: var(--hair) solid var(--app); border-radius: 50%; background: var(--bg);
+}
+.tl[data-look="blueprint"] .tl-line.tl-grid.tl-in .tl-app { animation: blueprint-wipe 0.24s linear backwards; animation-delay: calc(var(--col) * 130ms + var(--row) * 60ms); }
+.tl[data-look="blueprint"] .tl-grid.tl-in .tl-app::before { animation: blueprint-drop 0.07s linear backwards; animation-delay: calc(var(--col) * 130ms + var(--row) * 60ms); }
+@keyframes blueprint-drop { from { transform: scaleY(0); } }
+
+/* ---------------- the notification: a callout on a leader line ---------------- */
+
+.tl[data-look="blueprint"] .tl-note {
+  width: fit-content; margin-block: 1.5em 0.6em; padding: 0 0.6ch 0.12em 2.8ch; border: 0;
+}
+.tl[data-look="blueprint"] .tl-note::before {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 2.5ch; height: 1.9em;
+  background:
+    radial-gradient(circle at 0.24em 0.24em, var(--accent) 0 0.19em, transparent 0.21em) no-repeat,
+    linear-gradient(to top right, transparent calc(50% - var(--hair) * 0.6), var(--accent) 0, var(--accent) calc(50% + var(--hair) * 0.6), transparent 0) 0.24em 0.24em / calc(100% - 0.24em) calc(100% - 0.24em) no-repeat;
+}
+.tl[data-look="blueprint"] .tl-note::after {
+  content: ""; position: absolute; left: 2.5ch; right: 0; bottom: 0; height: var(--hair); margin-left: calc(var(--hair) * -1);
+  background: var(--accent);
+}
+.tl[data-look="blueprint"] .tl-line.tl-note.tl-in { animation: blueprint-plot 0.55s cubic-bezier(.4, 0, .2, 1) backwards; }
+
+/* ---------------- a launch, the prompt and the chips ---------------- */
+
+.tl[data-look="blueprint"] .tl-launch-text { position: relative; padding-left: 1.7ch; }
+.tl[data-look="blueprint"] .tl-line[data-role="wait"]::after { content: ""; display: inline-block; margin-left: 1ch; }
+.tl[data-look="blueprint"] .tl-line[data-role="wait"]::after,
+.tl[data-look="blueprint"] .tl-spin {
+  width: 0.72em; height: 0.72em; vertical-align: -0.06em; border: var(--hair) solid var(--app); border-radius: 50%;
+  background: linear-gradient(var(--app), var(--app)) 50% 0 / var(--hair) 50% no-repeat;
+  animation: tl-turn 0.9s linear infinite;
+}
+
+.tl[data-look="blueprint"] .tl-prompt { margin-top: 0.1em; }
+.tl[data-look="blueprint"] .tl-input { box-shadow: 0 var(--hair) 0 var(--faint); }
+.tl[data-look="blueprint"] .tl-prompt[data-kind="login"] .tl-input { -webkit-text-stroke: 0.11em var(--fg); letter-spacing: 0.12em; }
+.tl[data-look="blueprint"] .tl-cursor {
+  width: 1ch; height: 1.1em; margin-left: 0.1ch; border: var(--hair) solid; color: var(--accent); background: var(--hatch);
+}
+
+/* the chips sit in a ruled strip on the bottom border, each a rectangle whose lines run past its corners */
+.tl[data-look="blueprint"] .tl-chips {
+  gap: 0.85em; min-height: 3.1em; margin: 0.6em calc(var(--fx) - var(--pad)) 0; padding: 0.75em calc(var(--pad) - var(--fx)) 0.7em;
+  font-size: 0.95em;
+  border-top: var(--hair) solid var(--ink);
+}
+.tl[data-look="blueprint"] .tl-chip { position: relative; padding: 0.1em 0.55em; border: 0; border-radius: 0; animation: blueprint-wipe 0.18s linear backwards; }
+.tl[data-look="blueprint"] .tl-chip::before { content: ""; position: absolute; inset: 0 -0.3em; border-block: var(--hair) solid var(--ink); }
+.tl[data-look="blueprint"] .tl-chip::after { content: ""; position: absolute; inset: -0.3em 0; border-inline: var(--hair) solid var(--ink); }
+.tl[data-look="blueprint"] .tl-chip.is-app {
+  padding-left: 1.3em;
+  background: radial-gradient(circle at 0.62em 52%, transparent 0 0.16em, var(--app) 0.18em 0.25em, transparent 0.27em);
+}
+.tl[data-look="blueprint"] .tl-chip.is-key { color: var(--accent); }
+
+/* ---------------- things that only exist while something moves ---------------- */
+
+.tl[data-look="blueprint"] .bp-nib {
+  position: absolute; left: var(--fx); top: var(--fy); width: 1.7cqw; height: 1.7cqw; margin: -0.85cqw 0 0 -0.85cqw;
+  border-radius: 50%; background: var(--accent); box-shadow: 0 0 1.6cqw 0.3cqw rgba(255, 209, 102, 0.5); opacity: 0;
+}
+.tl[data-look="blueprint"] .bp-ping {
+  position: absolute; width: 11cqw; height: 11cqw; margin: -5.5cqw 0 0 -5.5cqw;
+  border: max(1px, 0.32cqw) solid var(--accent); border-radius: 50%; opacity: 0;
+}
+.tl[data-look="blueprint"] .bp-detail { position: absolute; inset: 0; }
+.tl[data-look="blueprint"] .bp-detail svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tl[data-look="blueprint"] .bp-disc { fill: #101216; }
+.tl[data-look="blueprint"] .bp-ring {
+  fill: none; stroke: var(--accent); stroke-width: max(1px, 0.5cqw); stroke-linecap: round;
+  transform-box: fill-box; transform-origin: 50% 50%; transform: rotate(-135deg);
+}
+.tl[data-look="blueprint"] .bp-cover { position: absolute; inset: 0; background: #101216; }

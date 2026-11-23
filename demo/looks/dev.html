@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>look bench</title>
+<!--
+  One look on one phone, for working on it.
+    dev.html?look=stock                 plays from waking, round and round
+    dev.html?look=stock&scene=granted   plays from a scene: wake, lock, granted, use, launch, off
+    dev.html?look=stock&still=home      a scene at rest: lock, home, use
+    &w=390                              the phone's width in px
+  window.__ready is true once the fonts are in and the phone is drawn.
+-->
+<link rel="stylesheet" href="src/base.css">
+<style>
+  html, body { margin: 0; background: #23262b; }
+  #host { width: 390px; }
+</style>
+<div id="host"></div>
+<script src="src/engine.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const id = q.get('look') || 'stock';
+  document.write('<link rel="stylesheet" href="src/skins/' + id + '.css">');
+  document.write('<script src="src/skins/' + id + '.js"><\/script>');
+</script>
+<script>
+  (async function () {
+    const host = document.getElementById('host');
+    host.style.width = (q.get('w') || 390) + 'px';
+    const look = TL.get(id);
+    if (!look) { document.body.append('no look called ' + id + ': src/skins/' + id + '.js did not register it'); return; }
+    if (look.fonts && look.fonts.length) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?' + look.fonts.map((f) => 'family=' + f).join('&') + '&display=swap';
+      document.head.append(link);
+      await new Promise((done) => { link.onload = done; link.onerror = done; setTimeout(done, 4000); });
+    }
+    // A face is only fetched once something uses it: lay a still out first so every face is asked for.
+    const probe = TL.create(host, id, { still: true });
+    await probe.still('use');
+    try { await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 4000))]); } catch (e) { /* no font loading here */ }
+    probe.destroy();
+
+    const still = q.get('still');
+    const player = TL.create(host, id, { still: !!still });
+    window.player = player;
+    if (still) await player.still(still); else player.play(q.get('scene') || 'wake');
+    window.__ready = true;
+  })();
+</script>

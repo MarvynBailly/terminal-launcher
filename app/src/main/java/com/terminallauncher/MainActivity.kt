@@ -18,7 +18,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.terminallauncher.ui.TerminalScreen
-import com.terminallauncher.ui.paletteFor
+import com.terminallauncher.ui.looks.lookFor
 
 /** The home screen. It only draws the terminal; the session itself lives in [App]. */
 class MainActivity : ComponentActivity() {
@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
         })
 
         setContent {
-            val palette = paletteFor(app.shell.theme)
+            val palette = lookFor(app.shell.look).palette(app.shell.theme)
             SideEffect {
                 window.navigationBarColor = palette.bg.toArgb()
                 WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = palette.light

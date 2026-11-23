@@ -1,0 +1,284 @@
+/*
+ * Phosphor: a P3 amber tube from 1983, seen through deep glass.
+ * One hue at three intensities (half, normal, bright); an error is reverse video, as it was.
+ * Everything that arrives is drawn by the beam and settles as the phosphor cools.
+ */
+.tl[data-look="phosphor"] {
+  --bg: #0a0602; --fg: #ffb000; --dim: #c08219; --line: #6e460c;
+  --accent: #ffe6b3; --app: #ffcd68; --ok: #ffcd68; --err: #ffb000;
+  --hot: #fff3d6;                               /* the beam itself */
+  --rule: max(1px, 0.07em) solid var(--fg);
+  --font: "VT323", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  --weight: 400; --lh: 1.05; --pad: 6.9cqw;
+  background: #040200;                          /* the glass with the tube off */
+}
+
+/* ---------------- the page ---------------- */
+
+/* VT323 is 0.4em wide: at 5.13cqw, 42 columns fill the page exactly (and a cell is 8 by 20 px on the bench). */
+.tl[data-look="phosphor"] .tl-screen {
+  padding: 8cqw var(--pad) 5.5cqw;
+  font-size: 5.13cqw;
+  text-shadow: 0 0 0.05em currentColor, 0 0 0.4em color-mix(in srgb, currentColor 52%, transparent);
+}
+
+/* the status line: a reverse-video bar at half intensity */
+.tl[data-look="phosphor"] .tl-status {
+  margin: 0 -1ch 0.5em; padding: 0.05em 1ch 0;
+  font-size: 1em; line-height: 1.1;
+  background: var(--dim); color: var(--bg); text-shadow: none;
+  box-shadow: 0 0 0.6em color-mix(in srgb, var(--dim) 60%, transparent);
+}
+
+/* room for the glow at the edges of the scrollback */
+.tl[data-look="phosphor"] .tl-lines { margin-inline: -1ch; padding-inline: 1ch; }
+.tl[data-look="phosphor"] .tl-line { position: relative; }
+.tl[data-look="phosphor"] .tl-line.is-tap { padding-block: 0.2em; }
+.tl[data-look="phosphor"] .is-tap .s-app { text-decoration: underline; text-decoration-color: var(--dim); text-decoration-thickness: max(1px, 0.05em); text-underline-offset: 0.12em; }
+
+/* bright is more light, so more bloom */
+.tl[data-look="phosphor"] .s-accent,
+.tl[data-look="phosphor"] .s-app,
+.tl[data-look="phosphor"] .s-ok,
+.tl[data-look="phosphor"] .tl-app,
+.tl[data-look="phosphor"] .tl-ps,
+.tl[data-look="phosphor"] .tl-note-app,
+.tl[data-look="phosphor"] .tl-launch-text {
+  text-shadow: 0 0 0.05em currentColor, 0 0 0.34em rgba(255, 190, 70, 0.75), 0 0 0.9em rgba(255, 176, 0, 0.32);
+}
+.tl[data-look="phosphor"] .tl-prompt[data-kind="login"] .tl-ps { color: var(--fg); }
+
+/* an error: reverse video */
+.tl[data-look="phosphor"] .s-err,
+.tl[data-look="phosphor"] .tl-gauge.is-alert .tl-gauge-note {
+  background: var(--err); color: var(--bg); text-shadow: none;
+  box-shadow: 0 0 0.55em rgba(255, 176, 0, 0.5);
+}
+.tl[data-look="phosphor"] .s-err { padding-inline: 0.5ch; }
+
+/* ---------------- the clock: double-height, double-width characters, as a VT100 drew them ---------------- */
+
+.tl[data-look="phosphor"] .tl-clock { padding-block: 0.6em 0.35em; }
+.tl[data-look="phosphor"] .ph-time {
+  display: block; font-size: 6.4em; line-height: 0.8; white-space: pre;
+  text-shadow: 0 0 0.02em currentColor, 0 0 0.13em rgba(255, 186, 60, 0.7), 0 0 0.5em rgba(255, 176, 0, 0.28);
+}
+.tl[data-look="phosphor"] .ph-time b { font-weight: inherit; }
+
+/* ---------------- gauges: block characters between brackets ---------------- */
+
+.tl[data-look="phosphor"] .tl-gauge-bar { position: relative; width: 14ch; height: 0.6em; gap: 0; margin-inline: 1ch; }
+.tl[data-look="phosphor"] .tl-gauge-bar::before,
+.tl[data-look="phosphor"] .tl-gauge-bar::after { position: absolute; top: 50%; margin-top: -0.56em; line-height: 1; color: var(--dim); }
+.tl[data-look="phosphor"] .tl-gauge-bar::before { content: "["; right: 100%; }
+.tl[data-look="phosphor"] .tl-gauge-bar::after { content: "]"; left: 100%; }
+/* a cell is one character wide, unlit cells at the lowest intensity; the gap is a border, so it stays a whole pixel however small the phone is drawn */
+.tl[data-look="phosphor"] .tl-gauge-bar i { border-right: 0.1em solid transparent; background-clip: padding-box; background-color: var(--line); }
+.tl[data-look="phosphor"] .tl-gauge-bar i.on { background-color: var(--fg); box-shadow: 0 0 0.45em rgba(255, 176, 0, 0.5); }
+.tl[data-look="phosphor"] .tl-gauge.is-alert .tl-gauge-bar i.on { background-color: var(--accent); background-clip: padding-box; box-shadow: 0 0 0.7em rgba(255, 190, 70, 0.6); }
+.tl[data-look="phosphor"] .tl-gauge.is-alert .tl-gauge-note { padding-right: 0.5ch; }
+
+/* ---------------- ls, the notification, the launch ---------------- */
+
+.tl[data-look="phosphor"] .tl-app { padding-block: 0.1em; overflow: visible; }
+
+/* a message box drawn in rules, its sender set into the top edge */
+.tl[data-look="phosphor"] .tl-note {
+  display: grid; grid-template-columns: 1.5ch auto 1fr;
+  margin-block: 0.5em 0.5em; padding: 0; border: 0;
+}
+.tl[data-look="phosphor"] .tl-note::before,
+.tl[data-look="phosphor"] .tl-note::after { content: ""; align-self: end; height: 0.5em; border-top: var(--rule); }
+.tl[data-look="phosphor"] .tl-note::before { grid-area: 1 / 1; border-left: var(--rule); }
+.tl[data-look="phosphor"] .tl-note::after { grid-area: 1 / 3; border-right: var(--rule); }
+.tl[data-look="phosphor"] .tl-note-app { grid-area: 1 / 2; margin: 0; padding-inline: 1ch; }
+.tl[data-look="phosphor"] .tl-note-text { grid-area: 2 / 1 / 3 / -1; padding: 0.05em 1.5ch 0.25em; border: var(--rule); border-top: 0; }
+
+/* the spinner a terminal has: | / - \ */
+.tl[data-look="phosphor"] .tl-spin {
+  width: 0.1em; height: 0.6em; margin-left: 1.3ch; vertical-align: 0.02em;
+  border: 0; border-radius: 0; background: var(--app); box-shadow: 0 0 0.4em rgba(255, 190, 70, 0.8);
+  animation: phosphor-spin 0.48s steps(4, end) infinite;
+}
+@keyframes phosphor-spin { to { transform: rotate(180deg); } }
+
+/* ---------------- the prompt ---------------- */
+
+/* a block cursor that goes out the way phosphor does: at once on, a short decay off */
+.tl[data-look="phosphor"] .tl-cursor {
+  width: 1ch; height: 0.8em; vertical-align: -0.1em;
+  background: var(--fg); box-shadow: 0 0 0.5em rgba(255, 176, 0, 0.6);
+  animation: phosphor-blink 1.1s linear infinite;
+}
+@keyframes phosphor-blink { 0%, 50% { opacity: 1; } 64%, 97% { opacity: 0; } 100% { opacity: 1; } }
+
+/* a typed character: where the cursor stood a moment ago, still glowing */
+.tl[data-look="phosphor"] .ph-key { animation: phosphor-key 0.4s cubic-bezier(.2, .7, .3, 1) backwards; }
+@keyframes phosphor-key {
+  from { color: var(--hot); background: rgba(255, 200, 104, 0.75); text-shadow: 0 0 0.12em #fff, 0 0 0.7em var(--fg); }
+}
+
+/* completion chips: soft-key labels along the bottom edge */
+.tl[data-look="phosphor"] .tl-chips { gap: 1ch; min-height: 1.95em; margin-inline: -1ch; padding: 0.55em 1ch 0.1em; }
+.tl[data-look="phosphor"] .tl-chip {
+  padding: 0.02em 1ch 0; border: 0; border-radius: 0; line-height: 1.12;
+  background: var(--line); color: var(--fg); text-shadow: none;
+  animation: phosphor-wipe 0.1s linear backwards;
+}
+.tl[data-look="phosphor"] .tl-chip:nth-child(2) { animation-delay: 45ms; }
+.tl[data-look="phosphor"] .tl-chip:nth-child(3) { animation-delay: 90ms; }
+.tl[data-look="phosphor"] .tl-chip:nth-child(4) { animation-delay: 135ms; }
+.tl[data-look="phosphor"] .tl-chip:nth-child(n + 5) { animation-delay: 180ms; }
+.tl[data-look="phosphor"] .tl-chip.is-app { background: var(--dim); color: var(--bg); box-shadow: 0 0 0.5em color-mix(in srgb, var(--dim) 55%, transparent); }
+.tl[data-look="phosphor"] .tl-chip.is-cmd { background: none; color: var(--fg); box-shadow: inset 0 0 0 max(1px, 0.07em) var(--dim); text-shadow: 0 0 0.4em rgba(255, 176, 0, 0.5); }
+.tl[data-look="phosphor"] .tl-chip.is-key { background: none; color: var(--dim); box-shadow: inset 0 0 0 max(1px, 0.07em) var(--line); }
+
+/* ---------------- how things arrive: drawn by the beam, left to right ---------------- */
+
+.tl[data-look="phosphor"] .tl-line.tl-in {
+  animation: phosphor-draw calc(var(--ph-n, 30) * 4.5ms + 30ms) linear backwards, phosphor-decay 0.62s ease-out backwards;
+}
+.tl[data-look="phosphor"] .tl-line.tl-in > span,
+.tl[data-look="phosphor"] .tl-grid.tl-in > .tl-app { animation: phosphor-decay 0.62s ease-out backwards; }
+@keyframes phosphor-draw {
+  from { clip-path: inset(-0.4em 100% -0.4em 0); }
+  to { clip-path: inset(-0.4em calc(100% - var(--ph-n, 30) * 1ch) -0.4em -1ch); }
+}
+/* freshly struck phosphor is white-hot, then cools to its own intensity */
+@keyframes phosphor-decay {
+  from { color: var(--hot); text-shadow: 0 0 0.1em var(--hot), 0 0 0.5em var(--fg), 0 0 1.1em var(--fg); }
+}
+/* the spot itself, with a short tail */
+.tl[data-look="phosphor"] .tl-text.tl-in::after,
+.tl[data-look="phosphor"] .tl-launch.tl-in::after {
+  content: ""; position: absolute; left: -4ch; top: 0.1em; bottom: 0.1em; width: 4ch; opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 196, 96, 0.22) 55%, rgba(255, 243, 214, 0.95) 97%);
+  box-shadow: 0 0 0.6em rgba(255, 190, 70, 0.5);
+  animation: phosphor-spot calc(var(--ph-n, 30) * 4.5ms + 30ms) linear backwards;
+}
+@keyframes phosphor-spot {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 1; transform: translateX(calc(var(--ph-n, 30) * 1ch)); }
+}
+.tl[data-look="phosphor"] .tl-line.is-blank.tl-in { animation: none; }
+.tl[data-look="phosphor"] .tl-line.is-blank.tl-in::after { content: none; }
+
+/* a gauge: its label is written, then the cells are struck one by one */
+.tl[data-look="phosphor"] .tl-gauge.tl-in { animation: none; }
+.tl[data-look="phosphor"] .tl-gauge.tl-in .tl-gauge-bar i.on {
+  animation: phosphor-cell 0.5s ease-out backwards; animation-delay: calc(var(--i) * 24ms + 70ms);
+}
+.tl[data-look="phosphor"] .tl-gauge.tl-in .tl-gauge-note {
+  animation: phosphor-struck 0.5s ease-out backwards; animation-delay: calc(var(--filled) * 24ms + 90ms);
+}
+@keyframes phosphor-cell {
+  0% { opacity: 0; background-color: var(--hot); }
+  2% { opacity: 1; background-color: var(--hot); box-shadow: 0 0 0.9em var(--hot); }
+}
+@keyframes phosphor-struck {
+  0% { opacity: 0; }
+  2% { opacity: 1; color: var(--hot); text-shadow: 0 0 0.1em var(--hot), 0 0 0.6em var(--fg); }
+}
+
+/* ls: in raster order, row after row */
+.tl[data-look="phosphor"] .tl-grid.tl-in { animation: none; }
+.tl[data-look="phosphor"] .tl-grid.tl-in > .tl-app {
+  animation: phosphor-wipe 0.13s linear backwards, phosphor-decay 0.6s ease-out backwards;
+  animation-delay: calc(var(--row) * 62ms + var(--col) * 26ms);
+}
+.tl[data-look="phosphor"] .tl-note.tl-in { animation: phosphor-wipe 0.26s linear backwards; }
+@keyframes phosphor-wipe {
+  from { clip-path: inset(-0.4em 100% -0.4em 0); }
+  to { clip-path: inset(-0.4em -1ch -0.4em -1ch); }
+}
+
+/* ---------------- the tube ---------------- */
+
+/* the lit raster: black on a tube is never quite black */
+.tl[data-look="phosphor"] .ph-raster {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 95% 70% at 50% 46%, #1e1303 0%, #150d02 50%, #0a0602 100%);
+}
+.tl[data-look="phosphor"][data-scene="off"] .ph-raster { opacity: 0; }
+.tl[data-look="phosphor"][data-scene="boot"] .ph-raster { transition: opacity 0.5s ease-out 0.2s; }
+.tl[data-look="phosphor"][data-scene="poweroff"] .ph-raster { opacity: 0; transition: opacity 0.2s ease-in; }
+
+.tl[data-look="phosphor"] .ph-scan { z-index: 4; }
+
+/* the refresh band, drifting down */
+.tl[data-look="phosphor"] .ph-band {
+  position: absolute; left: 0; right: 0; top: 0; height: 24cqh; z-index: 3;
+  background: linear-gradient(to bottom, transparent, rgba(255, 186, 80, 0.018) 30%, rgba(255, 186, 80, 0.045) 68%, rgba(255, 186, 80, 0.03) 84%, transparent);
+  transform: translateY(56cqh);
+  animation: phosphor-band 8s linear infinite;
+}
+@keyframes phosphor-band { from { transform: translateY(-26cqh); } to { transform: translateY(102cqh); } }
+
+/* the glass: a vignette, shading into the corners, edges that bow, and a little of the room in it */
+.tl[data-look="phosphor"] .ph-glass {
+  position: absolute; inset: 0; z-index: 5;
+  background:
+    radial-gradient(ellipse 70% 24% at 26% -6%, rgba(255, 240, 214, 0.05), transparent 72%),
+    radial-gradient(ellipse 72% 62% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.2) 78%, rgba(0, 0, 0, 0.52) 100%);
+  box-shadow: inset 0 0 7cqw 1cqw rgba(0, 0, 0, 0.6);
+  transition: opacity 0.2s;
+}
+.tl[data-look="phosphor"] .ph-glass::after {
+  content: ""; position: absolute; inset: -1cqw; filter: blur(0.5cqw);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpath fill-rule='evenodd' d='M0 0H100V100H0Z M3.2 2Q50-.4 96.8 2Q100.6 50 96.8 98Q50 100.4 3.2 98Q-.6 50 3.2 2Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+
+/* the mains: a tiny dip in brightness now and then */
+.tl[data-look="phosphor"] .ph-flick {
+  position: absolute; inset: 0; z-index: 6; background: #000; opacity: 0;
+  animation: phosphor-flicker 4.7s steps(1, end) infinite;
+}
+@keyframes phosphor-flicker {
+  0% { opacity: 0; } 7% { opacity: 0.035; } 8.5% { opacity: 0; } 31% { opacity: 0.02; } 32% { opacity: 0.05; } 33.5% { opacity: 0; }
+  58% { opacity: 0.03; } 59% { opacity: 0; } 83% { opacity: 0.045; } 84% { opacity: 0.015; } 86% { opacity: 0; }
+}
+.tl[data-look="phosphor"][data-scene="off"] .ph-band,
+.tl[data-look="phosphor"][data-scene="off"] .ph-flick,
+.tl[data-look="phosphor"] .ph-band.is-away,
+.tl[data-look="phosphor"] .ph-flick.is-away { visibility: hidden; }
+.tl[data-look="phosphor"] .ph-glass.is-away { opacity: 0; }
+.tl[data-look="phosphor"][data-scene="poweroff"] .ph-band { opacity: 0; transition: opacity 0.2s; }
+
+/* ---------------- what the transitions put on the tube ---------------- */
+
+/* the picture pulled shut into one line, and the spot it ends as */
+.tl[data-look="phosphor"] .ph-beam {
+  position: absolute; left: 0; right: 0; top: 50%; height: 0.5cqw; margin-top: -0.25cqw; z-index: 2;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, var(--hot) 14%, #fff 50%, var(--hot) 86%, transparent);
+  box-shadow: 0 0 1.6cqw 0.5cqw rgba(255, 196, 96, 0.85), 0 0 7cqw 1.6cqw rgba(255, 160, 20, 0.45);
+}
+.tl[data-look="phosphor"] .ph-dot {
+  position: absolute; left: 50%; top: 50%; width: 2cqw; height: 2cqw; margin: -1cqw 0 0 -1cqw; z-index: 2;
+  border-radius: 50%; opacity: 0; background: #fff;
+  box-shadow: 0 0 1.6cqw 0.8cqw rgba(255, 220, 160, 0.9), 0 0 7cqw 2.4cqw rgba(255, 160, 20, 0.5), 0 0 18cqw 6cqw rgba(255, 150, 0, 0.18);
+}
+/* the tube overdriven: blacks lift, everything washes toward the light */
+.tl[data-look="phosphor"] .ph-flash {
+  position: absolute; inset: 0; z-index: 2; opacity: 0;
+  background: radial-gradient(ellipse 120% 90% at 50% 50%, rgba(255, 214, 150, 0.4), rgba(255, 176, 50, 0.26) 60%, rgba(255, 150, 0, 0.12) 100%);
+}
+/* the visual bell */
+.tl[data-look="phosphor"] .ph-bell { position: absolute; inset: 0; z-index: 2; opacity: 0; background: rgba(255, 190, 80, 1); }
+
+/* vertical hold lost: copies of the page, one above the other, with the blanking bar between */
+.tl[data-look="phosphor"] .ph-roll { position: absolute; inset: 0; z-index: 2; }
+.tl[data-look="phosphor"] .ph-roll > .tl-screen { bottom: auto; height: 100cqh; }
+.tl[data-look="phosphor"] .ph-vbi {
+  position: absolute; left: 0; right: 0; height: 9cqh;
+  background: repeating-linear-gradient(97deg, transparent 0 4cqw, rgba(255, 176, 0, 0.1) 4cqw 4.3cqw), #000;
+  border-block: 0.3cqw solid rgba(255, 176, 0, 0.32);
+}
+/* burn-in: what the page was, staying where it was and fading */
+.tl[data-look="phosphor"] .ph-ghost { position: absolute; inset: 0; z-index: 1; }
+.tl[data-look="phosphor"] .ph-ghost > .tl-screen {
+  opacity: 0; filter: blur(0.3cqw);
+  animation: phosphor-burn 2.5s cubic-bezier(.15, .5, .3, 1) backwards;
+}
+@keyframes phosphor-burn { from { opacity: 0.32; } }
+.tl[data-look="phosphor"] .ph-copy .tl-cursor { animation: none; }

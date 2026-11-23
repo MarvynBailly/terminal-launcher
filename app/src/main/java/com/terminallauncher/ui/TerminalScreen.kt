@@ -8,7 +8,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -30,7 +29,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -42,11 +40,13 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -57,10 +57,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -78,9 +79,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -91,25 +90,34 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.terminallauncher.R
 import com.terminallauncher.shell.ChipKind
 import com.terminallauncher.shell.Cue
 import com.terminallauncher.shell.Fmt
+import com.terminallauncher.shell.Line
 import com.terminallauncher.shell.Note
 import com.terminallauncher.shell.Phone
 import com.terminallauncher.shell.Prompt
 import com.terminallauncher.shell.PromptKind
 import com.terminallauncher.shell.Shell
+import com.terminallauncher.ui.looks.Look
+import com.terminallauncher.ui.looks.LookEnv
+import com.terminallauncher.ui.looks.lookFor
 import kotlinx.coroutines.delay
 
-private val Mono = FontFamily(
-    Font(R.font.ibm_plex_mono_regular, FontWeight.Normal),
-    Font(R.font.ibm_plex_mono_medium, FontWeight.Medium),
+/**
+ * A fixed moment to draw in place of the live one, for pictures taken off the phone: a scene held
+ * at [ms], every line held [arriving] of the way in, a launch held at [launch] ms, and the clock
+ * that looks move by held at [time]. Nothing animates while a pose is given.
+ */
+class Pose(
+    val cue: Cue? = null,
+    val ms: Float = 0f,
+    /** The page from before the scene, as the shell had it: its lines and their ids. */
+    val before: Pair<List<Line>, List<Long>>? = null,
+    val arriving: Float? = null,
+    val launch: Float? = null,
+    val time: Float = 0f,
 )
-private val FONT_SIZE = 15.sp
-private val GUTTER = 16.dp
-private const val ADVANCE = 0.6f      // every IBM Plex Mono glyph is 0.6 em wide
 
 /** A cue the screen first sees this long after it was raised has missed its moment and is not played. */
 private const val CUE_FRESH_MS = 2000L
@@ -144,14 +152,42 @@ private class Idle {
  * [rev] changes whenever the shell or the phone has something new to show, [wake] whenever the
  * terminal should grab focus and raise the keyboard, and [visible] is false while the activity is
  * stopped. With [motion] off nothing animates: output appears at once and no scene plays.
+ *
+ * How any of it looks and moves is the business of the shell's [Look].
  */
 @Composable
-fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boolean, motion: Boolean) {
-    val palette = paletteFor(shell.theme)
+fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boolean, motion: Boolean, pose: Pose? = null) {
+    val look = lookFor(shell.look)
+    val palette = look.palette(shell.theme)
     val lines = shell.lines
     val ids = shell.lineIds
     val prompt = shell.prompt
-    val base = TextStyle(fontFamily = Mono, fontSize = FONT_SIZE, lineHeight = 22.sp, color = palette.fg)
+    val base = remember(look, palette) {
+        // No ligatures: in a terminal every character keeps its own cell.
+        look.type(
+            TextStyle(fontFamily = look.font, fontSize = look.fontSize, lineHeight = look.lineHeight, color = palette.fg, fontFeatureSettings = "'liga' 0, 'clig' 0, 'calt' 0"),
+            palette,
+        )
+    }
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val keyboardHeight = WindowInsets.ime.getBottom(density)
+    // The clock a look moves by at rest. It is read while drawing, so a tick redraws and lays nothing out.
+    val ambient = remember(pose) { mutableFloatStateOf(pose?.time ?: 0f) }
+    LaunchedEffect(look, motion, visible, pose) {
+        if (pose != null || !motion || !visible || !look.moves) return@LaunchedEffect
+        val start = withFrameMillis { it }
+        while (true) withFrameMillis { ambient.floatValue = (it - start).toFloat() }
+    }
+    val env = LookEnv(
+        palette = palette,
+        cell = with(density) { Size(look.fontSize.toPx() * look.advance, look.lineHeight.toPx()) },
+        measurer = measurer,
+        base = base,
+        locked = shell.locked,
+        time = { ambient.floatValue },
+        keyboard = keyboardHeight.toFloat(),
+    )
 
     var field by remember { mutableStateOf(TextFieldValue("")) }
     var histIdx by remember { mutableIntStateOf(-1) }
@@ -244,14 +280,18 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
 
     /* ---- scenes: the screen powering on and off, and the lock dissolving after a right password ---- */
 
-    val scene = remember(shell.cueSeq) {
+    val scene = remember(shell.cueSeq, pose, look) {
         val cue = shell.cue
         val fresh = System.currentTimeMillis() - shell.cueAt < CUE_FRESH_MS
-        if (motion && fresh && cue != null && cue != Cue.SAVER) Scene(cue, pageBefore.rows) else null
+        when {
+            pose != null -> pose.cue?.let { Scene(it, emptyList(), look, pose.ms) }
+            motion && fresh && cue != null && cue != Cue.SAVER -> Scene(cue, pageBefore.rows, look)
+            else -> null
+        }
     }
     // Keyed on being visible too: a scene the user never saw the end of is over, not paused.
     LaunchedEffect(scene, visible) {
-        if (scene != null && !scene.done) {
+        if (scene != null && !scene.done && pose == null) {
             if (visible) scene.play() else scene.finish()
         }
     }
@@ -267,15 +307,16 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
     /* ---- printing new lines one after another ---- */
 
     LaunchedEffect(ids.firstOrNull(), ids.lastOrNull(), ids.size, holding, motion) {
-        if (!motion) typist.skipTo(ids) else if (!holding) typist.print(lines, ids)
+        if (!motion || pose != null) typist.skipTo(ids) else if (!holding) typist.print(lines, ids)
     }
     val frontier = when {
+        pose != null -> if (holding) Long.MIN_VALUE else Long.MAX_VALUE     // a posed scene hides the page it leads to
         !motion -> Long.MAX_VALUE
         holding -> typist.shown
         else -> typist.frontier(lines, ids)
     }
     // The prompt comes back once everything that prints in turn is out.
-    val printing = lines.indices.any { ids[it] >= frontier && isPaced(lines[it]) }
+    val printing = (pose != null && holding) || lines.indices.any { ids[it] >= frontier && isPaced(lines[it]) }
 
     /* ---- the lock screen's screensaver ---- */
 
@@ -308,11 +349,10 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
     LaunchedEffect(visible) { if (!visible) launch = null }
 
     val bent = playing?.takeIf { it.bendsScreen }
-    val keyboardHeight = WindowInsets.ime.getBottom(LocalDensity.current)
     Box(
         Modifier
             .fillMaxSize()
-            .background(if (bent != null) Color.Black else palette.bg)
+            .background(if (bent != null) bent.motion().backdrop else palette.bg)
             .pointerInput(Unit) {
                 // sees every touch on its way down to whatever it lands on, and takes none of them
                 awaitEachGesture {
@@ -327,32 +367,28 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                 .then(
                     if (bent == null) Modifier
                     else Modifier
-                        .graphicsLayer {
-                            val tube = bent.tube(3.dp.toPx() / size.height)
-                            scaleX = tube.sx
-                            scaleY = tube.sy
-                            // The line forms in the middle of what can be seen, which is the part above the keyboard.
-                            transformOrigin = TransformOrigin(0.5f, ((size.height - keyboardHeight) / 2f / size.height).coerceIn(0.1f, 0.5f))
-                        }
-                        .drawWithContent {
-                            drawContent()
-                            val glow = bent.tube(3.dp.toPx() / size.height).glow
-                            if (glow > 0f) drawRect(TubeGlow, alpha = glow)
-                        },
+                        .graphicsLayer { with(bent.motion()) { shape(bent.motionTime(), env) } }
+                        .drawWithContent { with(bent.motion()) { draw(bent.motionTime(), env) } },
                 )
                 .background(palette.bg)
+                .drawBehind { with(look) { background(env) } }
                 .pointerInput(Unit) { detectTapGestures { raiseKeyboard() } },
         ) {
             Column(
                 Modifier
                     .fillMaxSize()
+                    // A look that moves at rest redraws its background every frame. The text goes in a
+                    // layer of its own so that does not redraw it too: glowing text redrawn sixty times
+                    // a second is costly, and crashed the Android emulator outright.
+                    .then(if (look.moves && motion) Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen } else Modifier)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = GUTTER),
+                    .then(with(look) { Modifier.frame(env) })
+                    .padding(horizontal = look.gutter),
             ) {
-                StatusLine(shell, phone, clock, rev, palette, base, motion)
+                StatusLine(shell, phone, clock, rev, look, env, motion)
 
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                    val charWidth = with(LocalDensity.current) { (FONT_SIZE * ADVANCE).toDp() }
+                    val charWidth = with(LocalDensity.current) { (look.fontSize * look.advance).toDp() }
                     val columns = (maxWidth / charWidth).toInt().coerceAtLeast(20)
                     val allRows = remember(lines, ids, columns) { buildRows(lines, ids, columns) }
                     val rows = remember(allRows, frontier) { allRows.filter { it.id < frontier } }
@@ -362,7 +398,7 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                         shell.columns = columns
                     }
 
-                    val env = RowEnv(
+                    val rowEnv = RowEnv(
                         palette = palette,
                         base = base,
                         charWidth = charWidth,
@@ -373,7 +409,10 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                         onRun = ::runTapped,
                         onFill = ::fill,
                         onBlank = ::raiseKeyboard,
-                        onLaunch = { if (motion) launch = it },
+                        onLaunch = { if (motion && pose == null) launch = it },
+                        look = look,
+                        lookEnv = env,
+                        fixed = pose?.let { it.arriving ?: 1f },
                     )
 
                     // keep the end of the output in view when more arrives or the keyboard moves
@@ -385,7 +424,7 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                     // The list is only as tall as its rows, so the prompt still follows the last line.
                     Column(Modifier.fillMaxSize()) {
                         LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth(), state = list) {
-                            items(rows.size, key = { rows[it].key }) { i -> RowView(rows[i], env) }
+                            items(rows.size, key = { rows[it].key }) { i -> RowView(rows[i], rowEnv) }
                         }
                         PromptLine(
                             prompt = prompt,
@@ -393,6 +432,7 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                             field = field,
                             palette = palette,
                             base = base,
+                            look = look,
                             focus = focus,
                             onChange = { v ->
                                 touched()
@@ -416,9 +456,13 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                         )
                     }
 
-                    if (playing != null && playing.showsBefore && playing.before.isNotEmpty()) {
+                    // A posed scene is handed the page from before. A live one remembers it.
+                    val posedBefore = remember(pose, columns) { pose?.before?.let { (was, wasIds) -> buildRows(was, wasIds, columns) } }
+                    val before = posedBefore ?: playing?.before.orEmpty()
+                    if (playing != null && playing.showsBefore && before.isNotEmpty()) {
                         PageFromBefore(
                             scene = playing,
+                            before = before,
                             env = RowEnv(
                                 palette = palette,
                                 base = base,
@@ -432,6 +476,9 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                                 onBlank = {},
                                 onLaunch = {},
                                 dissolve = if (playing.cue == Cue.GRANTED) ({ playing.time.value }) else null,
+                                look = look,
+                                lookEnv = env,
+                                fixed = 1f,
                             ),
                         )
                     }
@@ -442,8 +489,8 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                     input = field.text,
                     canRecall = takesCommands(prompt),
                     browsingHistory = histIdx != -1,
-                    palette = palette,
-                    base = base,
+                    look = look,
+                    env = env,
                     onFill = ::setField,
                     onRun = ::runTapped,
                     onRecall = ::recall,
@@ -454,7 +501,14 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                 )
             }
 
-            launch?.let { fx -> key(fx) { LaunchOverlay(fx, palette, base) } }
+            launch?.let { fx -> key(fx) { LaunchOverlay(fx, look, env, null) } }
+            // A posed launch starts from a line a little over half way down.
+            pose?.launch?.let { ms ->
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val top = constraints.maxHeight * 0.55f
+                    LaunchOverlay(LaunchFx("spotify", top, env.cell.height, 0L), look, env, ms / look.launchMs)
+                }
+            }
 
             (preview ?: idleSaver)?.let { kind ->
                 // On top of everything, and it swallows the touch that ends it so nothing underneath is hit.
@@ -462,6 +516,9 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
                     SaverView(kind, palette, Fmt.hhmm(clock))
                 }
             }
+
+            // The look's glass, in front of everything. It takes no touches.
+            Box(Modifier.fillMaxSize().drawBehind { with(look) { overlay(env) } })
         }
     }
 }
@@ -471,20 +528,26 @@ fun TerminalScreen(shell: Shell, phone: Phone, rev: Int, wake: Int, visible: Boo
  * it, or the lock screen while a right password dissolves it and "access granted" resolves below.
  */
 @Composable
-private fun PageFromBefore(scene: Scene, env: RowEnv) {
+private fun PageFromBefore(scene: Scene, before: List<Row>, env: RowEnv) {
     val granted = scene.cue == Cue.GRANTED
-    Box(Modifier.fillMaxSize().background(env.palette.bg).clipToBounds()) {
+    val look = env.look
+    val leaving = look.granted
+    // No ground of its own: the page it lies over prints nothing until this one has gone, and the
+    // look's background shows through both.
+    Box(
+        Modifier.fillMaxSize().clipToBounds().then(
+            if (!granted) Modifier
+            else Modifier
+                .graphicsLayer { with(leaving) { shape(scene.time.value, env.lookEnv) } }
+                .drawWithContent { with(leaving) { draw(scene.time.value, env.lookEnv) } },
+        ),
+    ) {
         Layout(
             content = {
-                Column(
-                    Modifier.fillMaxWidth().graphicsLayer {
-                        // the whole page lets go at the end, whatever is left of it
-                        if (granted) alpha = 1f - ((scene.time.value - (GRANTED_MS - 150f)) / 150f).coerceIn(0f, 1f)
-                    },
-                ) {
+                Column(Modifier.fillMaxWidth()) {
                     // only the end of a long scrollback can be on screen
-                    for (row in scene.before.takeLast(60)) key(row.key) { RowView(row, env) }
-                    if (granted) {
+                    for (row in before.takeLast(60)) key(row.key) { RowView(row, env) }
+                    if (granted && look.grantedWords) {
                         val seed = remember { (Math.random() * 1000).toInt() }
                         val frame by remember { derivedStateOf { (scene.time.value / 22f).toInt() } }
                         BasicText(scramble(frame * 22f, seed), style = env.base.copy(color = env.palette.ok))
@@ -501,55 +564,44 @@ private fun PageFromBefore(scene: Scene, env: RowEnv) {
     }
 }
 
-/** A band in the app color that grows from the launch line until it fills the screen, with the app's name on it. */
+/** An app being opened: whatever the look draws between the launch line and the app taking over. */
 @Composable
-private fun LaunchOverlay(fx: LaunchFx, palette: Palette, base: TextStyle) {
-    val time = elapsedSince(fx.bornAt, LAUNCH_SPIN_MS + LAUNCH_GROW_MS + 200)
+private fun LaunchOverlay(fx: LaunchFx, look: Look, env: LookEnv, fixed: Float?) {
+    val time = elapsedSince(fx.bornAt, look.launchMs, fixed)
     Box(
         Modifier.fillMaxSize().drawBehind {
-            val grown = ((time.value - LAUNCH_SPIN_MS) / LAUNCH_GROW_MS).coerceIn(0f, 1f)
-            if (grown > 0f) {
-                val eased = LaunchEase.transform(grown)
-                val top = fx.top * (1f - eased)
-                val bottom = fx.top + fx.height + (size.height - fx.top - fx.height) * eased
-                drawRect(palette.app, Offset(0f, top), Size(size.width, bottom - top))
-            }
+            with(look) { launch(time.value, Rect(0f, fx.top, size.width, fx.top + fx.height), fx.name, env) }
         },
-        contentAlignment = Alignment.Center,
-    ) {
-        BasicText(
-            text = fx.name,
-            style = base.copy(color = palette.bg, fontSize = 22.sp, fontWeight = FontWeight.Medium),
-            modifier = Modifier.graphicsLayer { alpha = ((time.value - LAUNCH_SPIN_MS - 180f) / 160f).coerceIn(0f, 1f) },
-        )
-    }
+    )
 }
 
 @Composable
-private fun StatusLine(shell: Shell, phone: Phone, clock: Long, rev: Int, palette: Palette, base: TextStyle, motion: Boolean) {
+private fun StatusLine(shell: Shell, phone: Phone, clock: Long, rev: Int, look: Look, env: LookEnv, motion: Boolean) {
     val locked = shell.locked
-    val small = base.copy(fontSize = 13.sp, color = palette.dim)
+    val palette = env.palette
+    val small = look.statusStyle(env)
     // rev and clock are the keys: the phone is only asked again when something changed or a second passed
     val track = remember(rev, clock / 1000) { if (locked) null else phone.nowPlaying()?.takeIf { it.playing } }
     // a notification that has just been printed gets a moment as a badge
     val news = !locked && shell.lines.lastOrNull { it is Note }?.let { clock - (it as Note).at < 3000 } == true
-    val right = remember(rev, clock / 1000, news, palette, track != null) {
+    val right = remember(rev, clock / 1000, news, palette, track != null, look) {
         buildAnnotatedString {
-            if (phone.torch() == true) withStyle(SpanStyle(color = palette.accent)) { append("torch ") }
+            fun say(text: String) = append(look.statusText(text))
+            if (phone.torch() == true) withStyle(SpanStyle(color = palette.accent)) { say("torch ") }
             // the line is short: while a track shows, its title gets the room the wifi marker had
-            if (track == null && phone.wifiOn()) append("wifi ")
+            if (track == null && phone.wifiOn()) say("wifi ")
             if (!locked) phone.notifications()?.size?.takeIf { it > 0 }?.let {
                 if (news) {
-                    withStyle(SpanStyle(color = palette.bg, background = palette.accent)) { append(" $it new ") }
+                    withStyle(SpanStyle(color = palette.bg, background = palette.accent)) { say(" $it new ") }
                     append(" ")
-                } else append("$it new ")
+                } else say("$it new ")
             }
             append("${phone.battery().percent}% ")
             append(Fmt.hhmm(clock))
         }
     }
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        BasicText("tty1 · " + (shell.remoteHost ?: if (locked) "locked" else "home"), style = small, maxLines = 1)
+    Row(with(look) { Modifier.fillMaxWidth().status(env) }, verticalAlignment = Alignment.CenterVertically) {
+        BasicText(look.statusText("tty1 · " + (shell.remoteHost ?: if (locked) "locked" else "home")), style = small, maxLines = 1)
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             if (track != null) {
                 BasicText(
@@ -591,6 +643,7 @@ private fun PromptLine(
     field: TextFieldValue,
     palette: Palette,
     base: TextStyle,
+    look: Look,
     focus: FocusRequester,
     onChange: (TextFieldValue) -> Unit,
     onSubmit: () -> Unit,
@@ -619,12 +672,7 @@ private fun PromptLine(
     val mirror = buildAnnotatedString {
         append(shown.substring(0, from))
         if (from == to) {
-            val block = when {
-                !focused -> SpanStyle(background = palette.dim, color = palette.bg)
-                blinkOn -> SpanStyle(background = palette.fg, color = palette.bg)
-                else -> SpanStyle()
-            }
-            withStyle(block) { append(shown.getOrNull(from)?.toString() ?: " ") }
+            withStyle(look.cursor(focused, blinkOn, palette)) { append(shown.getOrNull(from)?.toString() ?: " ") }
             if (from < shown.length) append(shown.substring(from + 1))
         } else {
             withStyle(SpanStyle(background = palette.dim, color = palette.bg)) { append(shown.substring(from, to)) }
@@ -637,7 +685,7 @@ private fun PromptLine(
     Row(Modifier.fillMaxWidth().alpha(if (prompt == null || hidden) 0f else 1f)) {
         BasicText(
             text = prompt?.text ?: "",
-            style = base.copy(color = if (takesCommands(prompt)) palette.accent else palette.fg),
+            style = base.copy(color = look.promptColor(takesCommands(prompt), palette)),
         )
         BasicTextField(
             value = field,
@@ -687,14 +735,15 @@ private fun ChipRow(
     input: String,
     canRecall: Boolean,
     browsingHistory: Boolean,
-    palette: Palette,
-    base: TextStyle,
+    look: Look,
+    env: LookEnv,
     onFill: (String) -> Unit,
     onRun: (String) -> Unit,
     onRecall: (Int) -> Unit,
     onKey: (String) -> Unit,
 ) {
     val found = shell.candidates(input)
+    val palette = env.palette
     Row(
         Modifier.fillMaxWidth().height(48.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -702,15 +751,15 @@ private fun ChipRow(
     ) {
         if (found == null) return@Row                        // no chips on the lock screen
         // phone keyboards have no arrow keys, so history gets chips of its own
-        if (canRecall && shell.history.isNotEmpty()) Chip("↑", palette.dim, palette, base) { onRecall(1) }
-        if (canRecall && browsingHistory) Chip("↓", palette.dim, palette, base) { onRecall(-1) }
+        if (canRecall && shell.history.isNotEmpty()) Chip("↑", palette.dim, look, env) { onRecall(1) }
+        if (canRecall && browsingHistory) Chip("↓", palette.dim, look, env) { onRecall(-1) }
         for (item in found.items.take(8)) {
             val color = when (item.kind) {
                 ChipKind.APP -> palette.app
                 ChipKind.KEY -> palette.accent
                 else -> palette.fg
             }
-            Chip(item.text, color, palette, base) {
+            Chip(item.text, color, look, env) {
                 if (item.kind == ChipKind.KEY) onKey(item.text)
                 else {
                     val pick = shell.pick(input, found, item)
@@ -722,14 +771,11 @@ private fun ChipRow(
 }
 
 @Composable
-private fun Chip(text: String, color: Color, palette: Palette, base: TextStyle, onClick: () -> Unit) {
+private fun Chip(text: String, color: Color, look: Look, env: LookEnv, onClick: () -> Unit) {
     BasicText(
         text = text,
-        style = base.copy(color = color),
+        style = look.chipStyle(color, env),
         maxLines = 1,
-        modifier = Modifier
-            .border(1.dp, palette.line, RoundedCornerShape(5.dp))
-            .tap(onClick)
-            .padding(horizontal = 11.dp, vertical = 5.dp),
+        modifier = Modifier.tap(onClick).then(with(look) { Modifier.chip(color, env) }),
     )
 }

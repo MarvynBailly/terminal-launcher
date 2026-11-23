@@ -29,3 +29,8 @@ keystore.properties
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Pictures of the looks, drawn by tools/shots.sh, and the web gallery's copy for publishing
+/shots/
+/demo/looks/artifact.html
+/demo/looks/.shots/

@@ -1,0 +1,283 @@
+/*
+ * ANSI: a dial-up bulletin board from 1994, in the sixteen VGA colours and nothing else.
+ *
+ * The phone is a text screen of 44 columns by 38 rows. A column is 1ch, a row is var(--rh), and
+ * everything sits on that grid: the bars, the frames, the gauges, the clock. Google serves VT323
+ * without its box-drawing and shade characters, so a frame is a border run through the middle of
+ * its cells (solid for a single line, double for a double line) and a shade is a dither mask.
+ * Text is drawn with a half-dot smear to the right, which gives VT323 the fat stems of a VGA face.
+ */
+.tl[data-look="bbs"] {
+  --bg: #000000; --fg: #AAAAAA; --dim: #00AAAA; --line: #555555;
+  --accent: #FFFF55; --app: #55FFFF; --ok: #55FF55; --err: #FF5555;
+  --font: "VT323", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  --weight: 400; --lh: 1; --pad: 0cqw;
+
+  --rh: calc(100cqh / 38);            /* one row of the text screen */
+  --fw: 0.1em;                        /* a single line */
+  --dw: 0.28em;                       /* a double line: two strokes and the gap between */
+  /* light, medium and dark shade, as masks: 4 dots to a column, 10 to a row */
+  --d1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 2' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM2 1h1v1H2z'/%3E%3C/svg%3E");
+  --d2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 2' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM2 0h1v1H2zM1 1h1v1H1zM3 1h1v1H3z'/%3E%3C/svg%3E");
+  --d3: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 2' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM2 0h2v1H2zM0 1h3v1H0z'/%3E%3C/svg%3E");
+  --dz: 1ch calc(var(--rh) / 5);
+}
+
+.tl[data-look="bbs"] .tl-screen {
+  padding: 0;
+  font-size: calc(100cqw / 17.6);     /* 44 columns of a face 0.4em wide */
+  line-height: var(--rh);
+  text-shadow: 0.021em 0 0 currentColor;   /* under half a dot: any more and the m closes up */
+}
+
+/* ---- the status line: an inverse bar, pinned as row 0 ---- */
+.tl[data-look="bbs"] .tl-status {
+  height: var(--rh); padding: 0 1ch; gap: 4ch;
+  background: #00AAAA; color: #000000; font-size: 1em;
+}
+.tl[data-look="bbs"] .tl-status-l { position: relative; margin-left: -1ch; padding: 0 1ch; background: #55FFFF; }
+.tl[data-look="bbs"] .tl-status-l::after {
+  content: ""; position: absolute; left: 100%; top: 0; width: 3ch; height: 100%; background: #55FFFF;
+  -webkit-mask: var(--d3) 0 0 / var(--dz) repeat-y, var(--d2) 1ch 0 / var(--dz) repeat-y, var(--d1) 2ch 0 / var(--dz) repeat-y;
+  mask: var(--d3) 0 0 / var(--dz) repeat-y, var(--d2) 1ch 0 / var(--dz) repeat-y, var(--d1) 2ch 0 / var(--dz) repeat-y;
+}
+
+/*
+ * The bottom bar rises out of three rows of shade: light, medium, dark. The lines and the prompt
+ * are opaque, so the shade is only seen where the page is still empty.
+ */
+.tl[data-look="bbs"] .tl-body { position: relative; }
+.tl[data-look="bbs"] .tl-body::before {
+  content: ""; position: absolute; z-index: -1; left: 0; right: 0; bottom: -0.05em; height: calc(var(--rh) * 3 + 0.05em);
+  background: #00AAAA; --ramp: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 30' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM2 1h1v1H2zM0 2h1v1H0zM2 3h1v1H2zM0 4h1v1H0zM2 5h1v1H2zM0 6h1v1H0zM2 7h1v1H2zM0 8h1v1H0zM2 9h1v1H2zM0 10h1v1H0zM2 10h1v1H2zM1 11h1v1H1zM3 11h1v1H3zM0 12h1v1H0zM2 12h1v1H2zM1 13h1v1H1zM3 13h1v1H3zM0 14h1v1H0zM2 14h1v1H2zM1 15h1v1H1zM3 15h1v1H3zM0 16h1v1H0zM2 16h1v1H2zM1 17h1v1H1zM3 17h1v1H3zM0 18h1v1H0zM2 18h1v1H2zM1 19h1v1H1zM3 19h1v1H3zM0 20h1v1H0zM2 20h2v1H2zM0 21h3v1H0zM0 22h1v1H0zM2 22h2v1H2zM0 23h3v1H0zM0 24h1v1H0zM2 24h2v1H2zM0 25h3v1H0zM0 26h1v1H0zM2 26h2v1H2zM0 27h3v1H0zM0 28h1v1H0zM2 28h2v1H2zM0 29h3v1H0z'/%3E%3C/svg%3E");
+  -webkit-mask: var(--ramp) 0 0 / 1ch 100%; mask: var(--ramp) 0 0 / 1ch 100%;
+}
+
+/* ---- lines: text starts in column 3, frames run through columns 1 and 42 ---- */
+.tl[data-look="bbs"] .tl-lines { padding-top: var(--rh); background: #000000; }
+.tl[data-look="bbs"] .tl-line {
+  position: relative; min-height: var(--rh); margin: 0 1ch; padding: 0 2ch;
+  white-space: pre; overflow-wrap: normal;
+  --x0: 2ch; --x1: 1ch;
+}
+.tl[data-look="bbs"] .tl-line.tl-in { animation: none; }
+
+/*
+ * Every line can carry a piece of a frame: its sides, and a top or a bottom edge through the
+ * middle of a row. A piece is switched on with --fsw (sides), --ft/--ftw (top) and --fb/--fbw
+ * (bottom), so a run of lines draws one box between them. A piece reaches a hair into the row
+ * above it, and so do the other things that are built from cells side by side: at a fractional
+ * device scale the seams between them would show.
+ */
+.tl[data-look="bbs"] .tl-line::before,
+.tl[data-look="bbs"] .tl-prompt::before {
+  content: ""; position: absolute; z-index: 1; pointer-events: none;
+  left: calc(0.5ch - var(--fw) / 2); right: calc(0.5ch - var(--fw) / 2);
+  top: var(--ft, -0.05em); bottom: var(--fb, 0px);
+  border: 0 var(--fk, solid) var(--fc, #00AAAA);
+  border-width: var(--ftw, 0px) var(--fsw, 0px) var(--fbw, 0px);
+}
+.tl[data-look="bbs"] .tl-line.tl-in::before { animation: bbs-draw 0.12s steps(6) backwards; }
+@keyframes bbs-draw { from { clip-path: inset(0 100% 0 0); } }
+
+/* the login summary: "Last login" sits in the title gap of the frame around the gauges */
+.tl[data-look="bbs"]:not([data-scene="off"], [data-scene="boot"], [data-scene="lock"], [data-scene="granted"]) .tl-lines > .tl-text:first-child {
+  --fsw: var(--fw); --ft: calc((var(--rh) - var(--fw)) / 2); --ftw: var(--fw);
+}
+.tl[data-look="bbs"]:not([data-scene="off"], [data-scene="boot"], [data-scene="lock"], [data-scene="granted"]) .tl-lines > .tl-text:first-child + .is-blank { --fsw: var(--fw); }
+
+/* a title in the gap of a top edge: it is written over the line */
+.tl[data-look="bbs"]:not([data-scene="off"], [data-scene="boot"], [data-scene="lock"], [data-scene="granted"]) .tl-lines > .tl-text:first-child > span,
+.tl[data-look="bbs"] .tl-line[data-role="lock-title"] > span,
+.tl[data-look="bbs"] .tl-text:has(> .s-accent:only-child) > span {
+  position: relative; z-index: 2; margin: 0 -1ch; padding: 0 1ch; background: #000000;
+}
+
+/* ---- gauges: full blocks, and light shade for the rest ---- */
+.tl[data-look="bbs"] .tl-gauge { --fsw: var(--fw); }
+.tl[data-look="bbs"] .tl-gauge:first-child,
+.tl[data-look="bbs"] .tl-line:not(.tl-gauge, .is-blank) + .tl-gauge {
+  padding-top: var(--rh); --tt: var(--rh);
+  --ft: calc((var(--rh) - var(--fw)) / 2); --ftw: var(--fw);
+}
+.tl[data-look="bbs"] .tl-gauge:not(:has(+ .tl-gauge)) {
+  padding-bottom: var(--rh);
+  --fb: calc((var(--rh) - var(--fw)) / 2); --fbw: var(--fw);
+}
+.tl[data-look="bbs"] .tl-gauge-label { width: 6ch; color: var(--fg); }
+/* the fourteen cells are drawn as two runs, so no seam shows between cells at any scale */
+.tl[data-look="bbs"] .tl-gauge-bar { position: relative; display: block; width: 14ch; height: 0.62em; margin-top: 0.1em; }
+.tl[data-look="bbs"] .tl-gauge-bar i { display: none; }
+.tl[data-look="bbs"] .tl-gauge-bar::before,
+.tl[data-look="bbs"] .tl-gauge-bar::after { content: ""; position: absolute; top: 0; bottom: 0; }
+.tl[data-look="bbs"] .tl-gauge-bar::before { left: 0; width: calc(var(--filled) * 1ch); background: #55FF55; }
+.tl[data-look="bbs"] .tl-gauge-bar::after {
+  left: calc(var(--filled) * 1ch); right: 0; background: #00AA00;
+  -webkit-mask: var(--d1) 0 0 / var(--dz); mask: var(--d1) 0 0 / var(--dz);
+}
+.tl[data-look="bbs"] .tl-gauge.is-alert .tl-gauge-bar::before { background: #FF5555; }
+.tl[data-look="bbs"] .tl-gauge.is-alert .tl-gauge-bar::after { background: #AA0000; }
+.tl[data-look="bbs"] .tl-gauge.tl-in .tl-gauge-note { animation: none; }
+
+/* ---- what can be tapped is a DOS-blue panel: the three summary lines, ruled apart ---- */
+.tl[data-look="bbs"] .tl-line.is-tap {
+  padding-block: var(--rh) 0; background: #0000AA; color: #FFFFFF;
+  --dim: #55FFFF; --app: #FFFF55; --cover: #0000AA; --tt: var(--rh);
+  --fc: #55FFFF; --fsw: var(--fw);
+  --ft: calc((var(--rh) - var(--fw)) / 2); --ftw: var(--fw);
+  --fb: calc(var(--rh) / -2);
+  box-shadow: 0 0.05em 0 #0000AA;
+}
+.tl[data-look="bbs"] .tl-line.is-tap:not(:has(+ .is-tap)) {
+  padding-bottom: var(--rh); box-shadow: none;
+  --fb: calc((var(--rh) - var(--fw)) / 2); --fbw: var(--fw);
+}
+
+/* ---- app names: a blue panel in a double frame ---- */
+.tl[data-look="bbs"] .tl-grid {
+  grid-template-columns: 13ch 13ch 12ch; padding: var(--rh) 2ch; background: #0000AA;
+  --cover: #0000AA; --fw: var(--dw); --fk: double; --fc: #55FFFF; --fsw: var(--fw);
+  --ft: calc((var(--rh) - var(--fw)) / 2); --ftw: var(--fw);
+  --fb: calc((var(--rh) - var(--fw)) / 2); --fbw: var(--fw);
+}
+.tl[data-look="bbs"] .tl-grid.tl-in::before { animation: bbs-drop 0.16s steps(8) backwards; }
+@keyframes bbs-drop { from { clip-path: inset(0 0 100% 0); } }
+.tl[data-look="bbs"] .tl-app { position: relative; height: var(--rh); padding: 0; --x0: 0ch; --x1: 0ch; }
+.tl[data-look="bbs"] .tl-grid.tl-in .tl-app { animation: none; }
+
+/* ---- the forecast: a frame with the place in its title gap ---- */
+.tl[data-look="bbs"] .tl-text:has(> .s-accent:only-child) {
+  --fsw: var(--fw); --ft: calc((var(--rh) - var(--fw)) / 2); --ftw: var(--fw);
+}
+.tl[data-look="bbs"] .tl-text:has(> .s-accent:only-child) ~ .tl-text:not(.tl-text:has(> .s-accent:only-child) ~ :not(.tl-text) ~ .tl-text) { --fsw: var(--fw); }
+.tl[data-look="bbs"] .tl-text:has(> .s-accent:only-child) ~ .tl-text:not(.tl-text:has(> .s-accent:only-child) ~ :not(.tl-text) ~ .tl-text):not(:has(+ .tl-text)) {
+  padding-bottom: var(--rh);
+  --fb: calc((var(--rh) - var(--fw)) / 2); --fbw: var(--fw);
+}
+
+/* ---- a notification: a pop-up box, double line, with its shadow two columns right and a row down ---- */
+.tl[data-look="bbs"] .tl-note {
+  isolation: isolate; height: calc(var(--rh) * 5); margin: 0 1ch; padding: var(--rh) 0 0 6ch; border: 0;
+  --cover: #AA00AA;
+}
+.tl[data-look="bbs"] .tl-note::before,
+.tl[data-look="bbs"] .tl-note.tl-in::before {
+  z-index: -1; border: 0; background: #AA00AA;
+  left: calc((4 + var(--ix, 0)) * 1ch); right: calc((4 + var(--ix, 0)) * 1ch);
+  top: calc((1 + var(--iy, 0)) * var(--rh)); bottom: calc((1 + var(--iy, 0)) * var(--rh));
+  animation: none;
+}
+.tl[data-look="bbs"] .tl-note::after {
+  content: ""; position: absolute; z-index: -2; background: #555555;
+  left: calc((6 + var(--ix, 0)) * 1ch); right: calc((2 + var(--ix, 0)) * 1ch);
+  top: calc((2 + var(--iy, 0)) * var(--rh)); bottom: calc(var(--iy, 0) * var(--rh));
+  -webkit-mask: var(--d2) 0 0 / var(--dz); mask: var(--d2) 0 0 / var(--dz);
+}
+.tl[data-look="bbs"] .tl-note-app {
+  display: block; width: fit-content; margin: 0 0 0 -1ch; padding: 0 1ch;
+  background: #AA00AA; color: #FFFF55;
+}
+.tl[data-look="bbs"] .tl-note-app::before {
+  content: ""; position: absolute; z-index: -1; visibility: visible;
+  left: calc((4.5 + var(--ix, 0)) * 1ch - var(--dw) / 2); right: calc((4.5 + var(--ix, 0)) * 1ch - var(--dw) / 2);
+  top: calc((1.5 + var(--iy, 0)) * var(--rh) - var(--dw) / 2); bottom: calc((1.5 + var(--iy, 0)) * var(--rh) - var(--dw) / 2);
+  border: var(--dw) double #FFFFFF;
+}
+.tl[data-look="bbs"] .tl-note-text { display: block; position: relative; width: fit-content; color: #FFFFFF; --x0: 0ch; --x1: 0ch; }
+.tl[data-look="bbs"] .tl-note.bbs-open > span { visibility: hidden; }
+
+/* ---- what was typed, and what is being opened ---- */
+.tl[data-look="bbs"] .tl-ps { color: #FF55FF; }
+.tl[data-look="bbs"] .tl-typed,
+.tl[data-look="bbs"] .tl-input { color: #FFFFFF; }
+.tl[data-look="bbs"] .tl-spin {
+  position: relative; width: 1ch; height: var(--rh); margin-left: 1ch; vertical-align: top;
+  border: 0; border-radius: 0; animation: none;
+}
+.tl[data-look="bbs"] .tl-spin::before {
+  content: ""; position: absolute; left: 0; top: 0; width: 50%; height: 50%; background: #FFFF55;
+  animation: bbs-quad 0.36s steps(1) infinite;
+}
+@keyframes bbs-quad { 25% { translate: 100% 0; } 50% { translate: 100% 100%; } 75% { translate: 0 100%; } }
+.tl[data-look="bbs"] .tl-line[data-role="wait"]::after {
+  content: ""; display: inline-block; width: 1ch; height: var(--rh); margin-left: 1ch; vertical-align: top;
+  background: #00AAAA; animation: bbs-march 0.45s steps(1) infinite;
+}
+@keyframes bbs-march { 33% { translate: 1ch 0; } 66% { translate: 2ch 0; } }
+
+/* ---- the prompt, and a block for a cursor ---- */
+.tl[data-look="bbs"] .tl-prompt { position: relative; min-height: var(--rh); padding: 0 3ch; }
+.tl[data-look="bbs"] .tl-prompt:not([data-kind="login"]) { background: #000000; box-shadow: 0 -0.05em 0 #000000; }
+.tl[data-look="bbs"] .tl-cursor { width: 1ch; height: var(--rh); vertical-align: top; background: #FFFFFF; animation-duration: 0.9s; }
+.tl[data-look="bbs"].bbs-busy .tl-prompt > * { visibility: hidden; }
+
+/* ---- the lock page: a login box in a double frame, the clock in block digits with a shade for a shadow ---- */
+.tl[data-look="bbs"] .tl-line[data-role="lock-title"],
+.tl[data-look="bbs"] .tl-clock,
+.tl[data-look="bbs"] .tl-line[data-role="lock-date"],
+.tl[data-look="bbs"] .tl-line[data-role="lock-info"],
+.tl[data-look="bbs"] .tl-line[data-role="granted"],
+.tl[data-look="bbs"] .tl-prompt[data-kind="login"] {
+  --fw: var(--dw); --fk: double; --fc: #55FFFF; --fsw: var(--fw);
+}
+.tl[data-look="bbs"] .tl-line[data-role="lock-title"] { --ft: calc((var(--rh) - var(--fw)) / 2); --ftw: var(--fw); }
+.tl[data-look="bbs"] .tl-line[data-role="lock-title"] > span { color: #FFFFFF; }
+.tl[data-look="bbs"] .tl-clock { padding: var(--rh) 2ch var(--rh) 4ch; }
+.tl[data-look="bbs"] .tl-clock-grid { position: relative; isolation: isolate; grid-template-columns: repeat(17, 2ch); gap: 0; width: 34ch; }
+.tl[data-look="bbs"] .tl-clock-grid i { aspect-ratio: auto; height: var(--rh); }
+.tl[data-look="bbs"] .tl-clock-grid i.on { position: relative; background: #FFFF55; box-shadow: 0.05em 0 0 #FFFF55, 0 0.05em 0 #FFFF55; }
+.tl[data-look="bbs"] .tl-clock-grid i.on::after {
+  content: ""; position: absolute; z-index: -1; inset: 0; translate: 1ch var(--rh); background: #AA5500;
+  -webkit-mask: var(--d2) 0 0 / var(--dz); mask: var(--d2) 0 0 / var(--dz);
+}
+.tl[data-look="bbs"] .tl-line[data-role="lock-date"] { padding-left: 4ch; color: #FFFFFF; }
+.tl[data-look="bbs"] .tl-line[data-role="lock-info"] {
+  padding-left: 4ch; padding-bottom: var(--rh);
+  --fb: calc((var(--rh) - var(--fw)) / 2); --fbw: var(--fw);
+}
+/* the box closes under the password, or under the word that answers it */
+.tl[data-look="bbs"] .tl-lines:has(+ .tl-prompt[data-kind="login"]:not([hidden])) .tl-line[data-role="lock-info"],
+.tl[data-look="bbs"] .tl-line[data-role="lock-info"]:has(+ [data-role="granted"]) { padding-bottom: 0; --fb: 0px; --fbw: 0px; }
+.tl[data-look="bbs"] .tl-line[data-role="granted"],
+.tl[data-look="bbs"] .tl-prompt[data-kind="login"] {
+  padding: var(--rh) 2ch var(--rh) 4ch; --tt: var(--rh);
+  --fb: calc((var(--rh) - var(--fw)) / 2); --fbw: var(--fw);
+}
+.tl[data-look="bbs"] .tl-prompt[data-kind="login"] { margin: 0 1ch; }
+.tl[data-look="bbs"] .tl-prompt[data-kind="login"]::after {
+  content: ""; position: absolute; z-index: -1; left: 14ch; top: var(--rh); width: 18ch; height: var(--rh); background: #0000AA;
+}
+
+/* ---- the chips: a second inverse bar, like a function-key legend ---- */
+.tl[data-look="bbs"] .tl-chips { height: var(--rh); min-height: var(--rh); padding: 0 1ch; gap: 1ch; background: #00AAAA; }
+.tl[data-look="bbs"] .tl-chip { padding: 0 1ch; border: 0; border-radius: 0; background: #55FFFF; color: #000000; }
+.tl[data-look="bbs"] .tl-chip.is-cmd { background: #FFFF55; }
+.tl[data-look="bbs"] .tl-chip.is-key { width: 3ch; padding: 0; overflow: hidden; text-align: center; background: #FFFFFF; }
+
+/*
+ * Text arriving down the line. A line waits with its frame drawn and its words held back
+ * (.bbs-hold), then is received a character at a time (.bbs-rx): a cover runs from column --k
+ * to the end of the row, and its leading edge is the block the modem is writing with. While it
+ * arrives, and for a moment after (.bbs-hot), a line is all one bright colour: a burst.
+ */
+.tl[data-look="bbs"] .bbs-hold { color: transparent !important; }
+.tl[data-look="bbs"] .bbs-hold > * { visibility: hidden; }
+.tl[data-look="bbs"] .bbs-rx::after {
+  content: ""; position: absolute; z-index: 3; top: var(--tt, 0px); height: var(--rh);
+  left: calc(var(--x0) + var(--k, 0) * 1ch); right: var(--x1);
+  background: var(--cover, #000000); border-left: 1ch solid var(--burst, #FFFFFF);
+}
+.tl[data-look="bbs"] .bbs-rx > span, .tl[data-look="bbs"] .bbs-hot > span,
+.tl[data-look="bbs"] .tl-app.bbs-rx, .tl[data-look="bbs"] .tl-app.bbs-hot,
+.tl[data-look="bbs"] .tl-note-text.bbs-rx, .tl[data-look="bbs"] .tl-note-text.bbs-hot { color: var(--burst, #FFFFFF) !important; }
+/* a title is written over its line, so it uncovers itself instead of hiding behind a cover */
+.tl[data-look="bbs"] .tl-lines > .tl-text:first-child.bbs-rx > span,
+.tl[data-look="bbs"] .tl-text:has(> .s-accent:only-child).bbs-rx > span { clip-path: inset(0 calc(100% - (var(--k, 0) + 1) * 1ch) 0 0); }
+.tl[data-look="bbs"] .tl-lines > .tl-text:first-child.bbs-rx::after,
+.tl[data-look="bbs"] .tl-text:has(> .s-accent:only-child).bbs-rx::after { right: auto; width: 0; background: none; }
+
+/* the cursor that is left when the page has scrolled away */
+.tl[data-look="bbs"] .bbs-cur {
+  position: absolute; left: calc(100cqw / 44 * 3); top: calc(100cqh / 38 * var(--r, 36));
+  width: calc(100cqw / 44); height: calc(100cqh / 38); background: #FFFFFF;
+}

@@ -70,6 +70,25 @@ android {
     kotlinOptions {
         jvmTarget = "1.8"
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { test ->
+                // The pictures of the looks (src/test/.../shots) draw the real UI off the phone. They are
+                // slow and are for looking at, so they only run when asked for: -Pshots
+                if (project.hasProperty("shots")) {
+                    test.systemProperty("roborazzi.test.record", "true")
+                    test.systemProperty("shots.only", (project.findProperty("shots") ?: "").toString())
+                    test.systemProperty("shots.groups", (project.findProperty("shotsGroups") ?: "").toString())
+                    test.systemProperty("shots.dir", (project.findProperty("shotsDir") ?: "${layout.buildDirectory.get().asFile}/shots").toString())
+                    test.maxHeapSize = "1536m"
+                } else {
+                    test.exclude("**/shots/**")
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -87,4 +106,10 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Android's own JSON reader is only a stub off the phone. This is the same one, for the tests.
     testImplementation("org.json:json:20240303")
+    // Draws the Compose UI on the desktop JVM, for the pictures of the looks.
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.26.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.26.0")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

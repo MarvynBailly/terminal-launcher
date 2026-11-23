@@ -16,7 +16,8 @@ enum class Entrance { TYPE, NONE, SHAKE }
 
 sealed interface Line
 
-data class TextLine(val spans: List<Span>, val entrance: Entrance = Entrance.TYPE) : Line
+/** [echo] marks a line that only repeats what was typed at a prompt. */
+data class TextLine(val spans: List<Span>, val entrance: Entrance = Entrance.TYPE, val echo: Boolean = false) : Line
 
 /** App names laid out in columns, the way `ls` prints them. Each one launches on tap. */
 data class AppGrid(val names: List<String>) : Line

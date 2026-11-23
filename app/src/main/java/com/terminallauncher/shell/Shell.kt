@@ -23,6 +23,26 @@ class Shell(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
+        /**
+         * The looks: each draws the whole terminal its own way and moves its own way. The first is
+         * the plain one, and the only one the color themes apply to.
+         */
+        val LOOKS = listOf(
+            "stock" to "the plain terminal",
+            "phosphor" to "an amber tube",
+            "aurora" to "glass over a night sky",
+            "teletype" to "ink on a paper roll",
+            "neon" to "a synthwave sunset",
+            "eink" to "calm e-paper",
+            "hud" to "a cockpit display",
+            "sumi" to "brush and ink",
+            "bbs" to "a 1994 bulletin board",
+            "brutal" to "a Swiss poster",
+            "blueprint" to "a cyanotype drawing",
+            "dotmatrix" to "an olive LCD",
+        )
+        const val STOCK_LOOK = "stock"
+
         val THEMES = listOf(
             "default", "green", "amber", "eink", "nord", "gruvbox", "dracula", "solarized", "synthwave", "paper",
         )
@@ -38,6 +58,7 @@ class Shell(
         private const val MAX_RECENTS = 6
         private const val WRAP = 34            // columns a row of tappable words may fill
         private const val KEY_THEME = "theme"
+        private const val KEY_LOOK = "look"
         private const val KEY_ALIASES = "aliases"
         private const val KEY_RECENTS = "recents"
         private const val KEY_LAST_LOGIN = "last_login"
@@ -106,6 +127,7 @@ class Shell(
             "weather prints the forecast",
             "screen shows your time on the phone",
             "screen budget 2h sets a daily budget",
+            "look changes how the terminal looks",
         )
         private val SHELL_PROMPT = Prompt("$ ", PromptKind.SHELL)
         private val LOGIN_PROMPT = Prompt("password: ", PromptKind.LOGIN, mask = true)
@@ -137,6 +159,10 @@ class Shell(
     var locked: Boolean = false
         private set
     var theme: String = store.get(KEY_THEME)?.takeIf { it in THEMES } ?: THEMES[0]
+        private set
+
+    /** One of [LOOKS], by its name. */
+    var look: String = store.get(KEY_LOOK)?.takeIf { id -> LOOKS.any { it.first == id } } ?: STOCK_LOOK
         private set
 
     /** One of [SAVERS], [SAVER_SHUFFLE] or [SAVER_OFF]. */
@@ -427,6 +453,7 @@ class Shell(
             word == "call" || word == "sms" ->
                 if (firstArg) lastWord(phone.contacts().orEmpty().map { it.name }.distinct()) else none
             word == "theme" -> if (firstArg) lastWord(THEMES) else none
+            word == "look" -> if (firstArg) lastWord(LOOKS.map { it.first }) else none
             word == "saver" -> if (firstArg) lastWord(SAVER_CHOICES + "show") else none
             word == "np" -> if (firstArg) lastWord(listOf("pause", "play", "next", "prev")) else none
             word == "fx" -> if (firstArg) lastWord(listOf("on", "off")) else none
@@ -558,6 +585,7 @@ class Shell(
         TextLine(
             listOf(Span(p.text, if (p.kind == PromptKind.SHELL) Style.ACCENT else Style.NORMAL), Span(text)),
             Entrance.NONE,
+            echo = true,
         ),
     )
 
@@ -1400,6 +1428,17 @@ class Shell(
         }
     }
 
+    /** Every look on a row of its own, tappable, with the one in use in brackets. */
+    private fun lookList() {
+        for ((id, about) in LOOKS) {
+            val current = id == look
+            row(
+                Span((if (current) "[$id]" else id).padEnd(12), if (current) Style.ACCENT else Style.APP, "look $id"),
+                Span(about, Style.DIM, "look $id"),
+            )
+        }
+    }
+
     /* ---------------- screen time ---------------- */
 
     /** Midnight at the start of the day [daysAgo] days before today, by the phone's own calendar. */
@@ -1459,7 +1498,7 @@ class Shell(
         else {
             val time = whole.sumOf { it.screenMs } / whole.size
             val unlocks = (whole.sumOf { it.unlocks } + whole.size / 2) / whole.size
-            print("average: ${onScreen(time)} on screen, ${unlockCount(unlocks)} a day", Style.DIM)
+            print("average: ${onScreen(time)}, ${unlockCount(unlocks)} a day", Style.DIM)
         }
         if (budget != null) {
             val today = shown.last().screenMs
@@ -1810,6 +1849,22 @@ class Shell(
                 theme = t
                 store.put(KEY_THEME, t)
                 print("theme $t")
+                if (look != STOCK_LOOK) row(Span("It colors the stock look: ", Style.DIM), Span("look stock", Style.APP, "look stock"))
+            }
+        }
+        def("look", "system", "look [name]", "a whole new look") { args, _ ->
+            val name = args.firstOrNull()?.lowercase()
+            when {
+                name == null -> lookList()
+                LOOKS.none { it.first == name } -> {
+                    print("look: no look '${args[0]}'. Try one of", Style.ERR)
+                    lookList()
+                }
+                else -> {
+                    look = name
+                    store.put(KEY_LOOK, name)
+                    print("look $name")
+                }
             }
         }
         def("saver", "system", "saver [name]", "lock screensaver") { args, _ ->

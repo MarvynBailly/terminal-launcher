@@ -1,0 +1,122 @@
+/*
+ * The phone's structure, shared by every look. A look restyles all of it from its own stylesheet,
+ * scoped to .tl[data-look="its-id"].
+ *
+ * Everything is sized from the phone's width, so a phone drawn small is the same picture, smaller:
+ * inside .tl-screen use em (1em is 3.6% of the phone's width), in the layers use cqw and cqh.
+ */
+.tl {
+  /* a look's palette and type */
+  --bg: #000000; --fg: #d6d8d2; --dim: #7b8086; --line: #2b2e33;
+  --accent: #f0b45e; --app: #8fbaf0; --ok: #a3d18b; --err: #f58675;
+  --font: ui-monospace, "Cascadia Mono", "Roboto Mono", Consolas, Menlo, monospace;
+  --weight: 400;
+  --lh: 1.5;
+  --pad: 4.2cqw;
+
+  position: relative; display: block; width: 100%; aspect-ratio: 9 / 19.5;
+  overflow: hidden; isolation: isolate; container-type: size;
+  background: var(--bg); color: var(--fg);
+  text-align: left; user-select: none; -webkit-user-select: none;
+}
+.tl *, .tl *::before, .tl *::after { box-sizing: border-box; }
+.tl [hidden] { display: none !important; }
+
+/* three layers: behind the text, the text, over the text */
+.tl-bg, .tl-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.tl-bg { z-index: 0; }
+.tl-fx { z-index: 3; }
+.tl-screen {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; flex-direction: column;
+  padding: 7cqw var(--pad) 3.5cqw;
+  font: var(--weight) 3.6cqw/var(--lh) var(--font);
+  font-variant-ligatures: none; font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+.tl[data-scene="off"] .tl-screen { visibility: hidden; }
+
+.tl-status {
+  flex: none; display: flex; justify-content: space-between; gap: 1em;
+  padding-bottom: 0.7em;
+  color: var(--dim); font-size: 0.86em; white-space: nowrap;
+}
+.tl-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Only as tall as its lines, so the prompt follows the last line until the page is full. */
+.tl-lines { flex: 0 1 auto; min-height: 0; overflow: hidden; }
+.tl-line { min-height: calc(var(--lh) * 1em); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tl-line.is-tap { padding-block: 0.28em; }
+
+.tl .s-dim { color: var(--dim); }
+.tl .s-accent { color: var(--accent); }
+.tl .s-app { color: var(--app); }
+.tl .s-ok { color: var(--ok); }
+.tl .s-err { color: var(--err); }
+
+/* a line as it arrives: printed left to right. At rest a line is simply there. */
+.tl-line.tl-in { animation: tl-print 0.18s steps(14) backwards; }
+@keyframes tl-print { from { clip-path: inset(0 100% 0 0); } }
+
+/* the lock screen's clock: 17 by 5 cells */
+.tl-clock { padding-block: 1.3em 0.9em; }
+.tl-clock-grid { display: grid; grid-template-columns: repeat(17, 1fr); gap: 0.7cqw; width: 62cqw; }
+.tl-clock-grid i { display: block; aspect-ratio: 1; }
+.tl-clock-grid i.on { background: var(--fg); }
+
+/* a labelled bar of 14 cells */
+.tl-gauge { display: flex; align-items: center; white-space: pre; }
+.tl-gauge-label { flex: none; width: 6ch; color: var(--dim); }
+.tl-gauge-bar { flex: none; display: grid; grid-template-columns: repeat(14, 1fr); gap: 0.2em; width: 12.6ch; height: 0.8em; }
+.tl-gauge-bar i { display: block; background: var(--line); }
+.tl-gauge-bar i.on { background: var(--fg); }
+.tl-gauge.is-alert .tl-gauge-bar i.on { background: var(--err); }
+.tl-gauge-note { margin-left: 1ch; color: var(--dim); }
+.tl-gauge.is-alert .tl-gauge-note { color: var(--err); }
+.tl-gauge.tl-in { animation: none; }
+.tl-gauge.tl-in .tl-gauge-bar i.on { animation: tl-cell 0.01s linear backwards; animation-delay: calc(var(--i) * 28ms); }
+.tl-gauge.tl-in .tl-gauge-note { animation: tl-cell 0.01s linear backwards; animation-delay: calc(var(--filled) * 28ms); }
+@keyframes tl-cell { from { opacity: 0; } }
+
+/* app names in three columns, filled down each column like ls */
+.tl-grid { display: grid; grid-auto-flow: column; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(var(--rows, 6), auto); }
+.tl-app { color: var(--app); padding-block: 0.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-grid.tl-in { animation: none; }
+.tl-grid.tl-in .tl-app { animation: tl-rise 0.32s cubic-bezier(.2,.7,.2,1) backwards; animation-delay: calc(var(--col) * 110ms + var(--row) * 45ms); }
+@keyframes tl-rise { from { opacity: 0; transform: translateY(0.4em); } }
+
+/* a notification that arrived while the terminal was open */
+.tl-note { margin-block: 0.35em; padding-left: 0.8em; border-left: 0.18em solid var(--accent); }
+.tl-note-app { color: var(--accent); margin-right: 1ch; }
+
+.tl-launch-text { color: var(--app); }
+.tl-spin { display: inline-block; width: 0.5em; height: 0.5em; margin-left: 1ch; border: 0.1em solid var(--app); border-top-color: transparent; border-radius: 50%; animation: tl-turn 0.6s linear infinite; }
+@keyframes tl-turn { to { transform: rotate(1turn); } }
+
+.tl-prompt { flex: none; min-height: calc(var(--lh) * 1em); white-space: pre; }
+.tl-ps { color: var(--accent); }
+.tl-prompt[data-kind="login"] .tl-ps { color: var(--fg); }
+.tl-cursor { display: inline-block; width: 1ch; height: 1.15em; vertical-align: text-bottom; background: var(--fg); animation: tl-blink 1.1s steps(1) infinite; }
+@keyframes tl-blink { 50% { opacity: 0; } }
+
+/* completion chips, where the keyboard's top edge would be */
+.tl-chips { flex: none; display: flex; gap: 0.5em; min-height: 2.5em; padding-top: 0.6em; overflow: hidden; white-space: nowrap; }
+.tl-chip { flex: none; padding: 0.15em 0.75em; border: max(1px, 0.07em) solid var(--line); border-radius: 0.3em; color: var(--dim); }
+.tl-chip.is-app { color: var(--app); }
+.tl-chip.is-cmd { color: var(--fg); }
+
+/* the sheet a launch grows from its line, and the app it opens: another app, the same in every look */
+.tl-launch-sheet { position: absolute; inset: 0; background: #101216; }
+.tl-appview {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2.2cqw;
+  background: #101216; color: #f1f3f5;
+  font: 500 4.6cqw/1.3 system-ui, "Segoe UI", Roboto, sans-serif;
+}
+.tl-appview-icon { display: grid; place-items: center; width: 20cqw; height: 20cqw; border-radius: 5cqw; background: #1ed760; color: #101216; font-size: 10cqw; font-weight: 700; }
+.tl-appview-sub { font-size: 3cqw; font-weight: 400; color: #8b93a0; }
+
+/* a still: the scene at rest, nothing moving */
+.tl.tl-still *, .tl.tl-still *::before, .tl.tl-still *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .tl *, .tl *::before, .tl *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

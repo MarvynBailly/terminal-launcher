@@ -66,6 +66,9 @@ import com.terminallauncher.shell.Phone
 import com.terminallauncher.shell.Style
 import com.terminallauncher.shell.TextLine
 import com.terminallauncher.shell.Track
+import com.terminallauncher.ui.looks.LockLine
+import com.terminallauncher.ui.looks.Look
+import com.terminallauncher.ui.looks.LookEnv
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -134,6 +137,11 @@ internal class RowEnv(
     val onLaunch: (LaunchFx) -> Unit,
     /** Milliseconds into the lock screen's dissolve, while the page is being dissolved. */
     val dissolve: (() -> Float)? = null,
+    /** How everything is drawn, and what the look is told when it draws. */
+    val look: Look,
+    val lookEnv: LookEnv,
+    /** Holds every entrance this far through, from 0 to 1, in place of letting it play. For pictures. */
+    val fixed: Float? = null,
 )
 
 @Composable
@@ -154,12 +162,10 @@ internal fun RowView(row: Row, env: RowEnv) {
     }
 }
 
-private fun styled(line: TextLine, palette: Palette): AnnotatedString = buildAnnotatedString {
+private fun styled(line: TextLine, look: Look, palette: Palette): AnnotatedString = buildAnnotatedString {
     for (span in line.spans) {
         val from = length
-        val look = if (span.style == Style.MARK) SpanStyle(color = palette.bg, background = palette.accent)
-        else SpanStyle(color = palette.of(span.style))
-        withStyle(look) { append(span.text) }
+        withStyle(look.span(span.style, palette)) { append(span.text) }
         if (span.run != null) addStringAnnotation("run", span.run, from, length)
         if (span.fill != null) addStringAnnotation("fill", span.fill, from, length)
     }
@@ -176,25 +182,33 @@ private fun Modifier.printed(progress: () -> Float): Modifier = drawWithContent 
 @Composable
 private fun TextRowView(row: TextRow, env: RowEnv) {
     val line = row.line
-    val text = remember(line, env.palette) { styled(line, env.palette) }
+    val look = env.look
+    val text = remember(line, env.palette, look) { styled(line, look, env.palette) }
     val tappable = line.spans.any { it.run != null || it.fill != null }
     val born = env.bornAt(row.id)
     val entrance = when (line.entrance) {
         Entrance.TYPE -> {
-            val time = elapsedSince(born, TYPE_MS)
-            Modifier.printed { time.value / TYPE_MS }
+            val time = elapsedSince(born, look.lineMs, env.fixed)
+            with(look) { Modifier.arriving({ time.value / look.lineMs }, env.lookEnv) }
         }
         Entrance.SHAKE -> {
-            val time = elapsedSince(born, SHAKE_MS)
+            val time = elapsedSince(born, SHAKE_MS, env.fixed)
             Modifier.graphicsLayer { translationX = shakeAt(time.value / SHAKE_MS) * density }
         }
         Entrance.NONE -> Modifier
+    }
+    val around = with(look) {
+        when {
+            line.echo -> Modifier.echoRow(env.lookEnv)
+            tappable -> Modifier.tapRow(env.lookEnv)
+            else -> Modifier
+        }
     }
     ClickableText(
         text = text,
         style = env.base,
         // a little more height where there is something to hit
-        modifier = Modifier.fillMaxWidth().then(entrance).padding(vertical = if (tappable) 4.dp else 0.dp),
+        modifier = Modifier.fillMaxWidth().then(entrance).then(around).padding(vertical = if (tappable) 4.dp else 0.dp),
         onClick = { at ->
             val run = text.getStringAnnotations("run", at, at).firstOrNull()
             val fill = text.getStringAnnotations("fill", at, at).firstOrNull()
@@ -217,9 +231,9 @@ private fun GridRowView(row: GridRow, env: RowEnv) {
     val palette = env.palette
     val rowGap = minOf(45f, WAVE_ROWS_MS / row.count)
     val total = (3 * WAVE_COLUMN_MS + row.part * rowGap + WAVE_RISE_MS).toInt()
-    val time = elapsedSince(env.bornAt(row.id), total)
+    val time = elapsedSince(env.bornAt(row.id), total, env.fixed)
     val run by rememberUpdatedState(env.onRun)
-    Row {
+    Row(with(env.look) { Modifier.appRow(row.part == 0, row.part == row.count - 1, env.lookEnv) }) {
         row.cells.forEachIndexed { column, name ->
             // lights up under the finger and stays lit for a moment, so the tap is seen before the app opens
             var lit by remember(name) { mutableStateOf(false) }
@@ -250,6 +264,7 @@ private fun GridRowView(row: GridRow, env: RowEnv) {
                         role = Role.Button
                         onClick { run("open $name"); true }
                     }
+                    .then(with(env.look) { Modifier.appCell(lit, env.lookEnv) })
                     .padding(top = 6.dp, bottom = 6.dp, end = env.charWidth * 2)
                     .background(if (lit) palette.app else Color.Transparent),
             )
@@ -257,18 +272,11 @@ private fun GridRowView(row: GridRow, env: RowEnv) {
     }
 }
 
-/** The clock cells of a dissolving lock screen go dark one by one over this long, each taking [CELL_FADE_MS]. */
-private const val DISSOLVE_SPREAD_MS = 380f
-private const val CELL_FADE_MS = 160f
-internal const val DISSOLVE_FROM_MS = 200f
-
 @Composable
 private fun LockHeaderView(env: RowEnv) {
     val palette = env.palette
     val base = env.base
     val time = Fmt.hhmm(env.clock)
-    val cells = remember(time) { clockCells(time) }
-    val cell = min(env.width * 0.035f, 14.dp)
     val phone = env.phone
     val summary = remember(env.clock / 1000) {
         val count = phone.notifications()?.size
@@ -280,53 +288,38 @@ private fun LockHeaderView(env: RowEnv) {
             else -> "$count notifications · $battery"
         }
     }
-    val dissolve = env.dissolve
-    val delays = remember { FloatArray(CLOCK_COLUMNS * CLOCK_ROWS) { Math.random().toFloat() * DISSOLVE_SPREAD_MS } }
     Column {
-        BasicText("phone login · tty1", style = base.copy(color = palette.dim))
+        val look = env.look
+        BasicText(look.lockText(LockLine.TITLE, "phone login · tty1"), style = look.lockStyle(LockLine.TITLE, env.lookEnv))
         Spacer(Modifier.height(22.dp))
-        Canvas(Modifier.size(width = cell * CLOCK_COLUMNS + cell * CLOCK_GAP * (CLOCK_COLUMNS - 1), height = cell * CLOCK_ROWS + cell * CLOCK_GAP * (CLOCK_ROWS - 1))) {
-            val ms = dissolve?.invoke()
-            drawPixelClock(cells, Offset.Zero, cell.toPx(), palette.fg) { i ->
-                if (ms == null) 1f else 1f - ((ms - DISSOLVE_FROM_MS - delays[i]) / CELL_FADE_MS).coerceIn(0f, 1f)
-            }
-        }
+        look.Clock(time, env.width, env.lookEnv, env.dissolve)
         Spacer(Modifier.height(16.dp))
-        BasicText(Fmt.day(env.clock), style = base)
-        BasicText(summary, style = base.copy(color = palette.dim))
+        BasicText(look.lockText(LockLine.DATE, Fmt.day(env.clock)), style = look.lockStyle(LockLine.DATE, env.lookEnv))
+        BasicText(look.lockText(LockLine.INFO, summary), style = look.lockStyle(LockLine.INFO, env.lookEnv))
         BasicText(" ", style = base)
     }
 }
 
-private const val GAUGE_CELLS = 14
-private const val GAUGE_CELL_MS = 30f
+/** A full bar takes this long to fill. */
+private const val GAUGE_FILL_MS = 420f
 
 @Composable
 private fun GaugeRowView(row: GaugeRow, env: RowEnv) {
     val palette = env.palette
     val gauge = row.gauge
-    val target = ((gauge.percent * GAUGE_CELLS + 50) / 100).coerceIn(0, GAUGE_CELLS)
-    val fillMs = GAUGE_CELLS * GAUGE_CELL_MS
-    val time = elapsedSince(env.bornAt(row.id), (fillMs + 120).toInt())
-    val cellWidth = 6.dp
-    val gap = 2.dp
+    val look = env.look
+    val target = gauge.percent.coerceIn(0, 100) / 100f
+    val time = elapsedSince(env.bornAt(row.id), (GAUGE_FILL_MS + 120).toInt(), env.fixed)
     Row(verticalAlignment = Alignment.CenterVertically) {
         BasicText(gauge.label.padEnd(6), style = env.base.copy(color = palette.dim))
-        Canvas(Modifier.size(width = cellWidth * GAUGE_CELLS + gap * (GAUGE_CELLS - 1), height = 11.dp)) {
-            val filled = minOf(target, (time.value / GAUGE_CELL_MS).toInt())
-            val step = (cellWidth + gap).toPx()
-            for (i in 0 until GAUGE_CELLS) {
-                drawRect(
-                    color = if (i >= filled) palette.line else if (gauge.alert) palette.err else palette.fg,
-                    topLeft = Offset(i * step, 0f),
-                    size = Size(cellWidth.toPx(), size.height),
-                )
-            }
+        Canvas(Modifier.size(look.gaugeSize)) {
+            // the bar runs up to its value, and the note follows once it is there
+            with(look) { gauge(minOf(target, time.value / GAUGE_FILL_MS), target, gauge.alert, env.lookEnv) }
         }
         BasicText(
             text = " " + gauge.note,
             style = env.base.copy(color = if (gauge.alert) palette.err else palette.dim),
-            modifier = Modifier.graphicsLayer { alpha = if (time.value >= minOf(fillMs, (target + 1) * GAUGE_CELL_MS)) 1f else 0f },
+            modifier = Modifier.graphicsLayer { alpha = if (time.value >= minOf(GAUGE_FILL_MS, target * GAUGE_FILL_MS + 30f)) 1f else 0f },
         )
     }
 }
@@ -339,7 +332,7 @@ private const val FETCH_ROW_MS = 70
 private fun FetchRowView(row: FetchRow, env: RowEnv) {
     val palette = env.palette
     val rows = row.fetch.rows
-    val time = elapsedSince(env.bornAt(row.id), rows.size * FETCH_ROW_MS + TYPE_MS + 120)
+    val time = elapsedSince(env.bornAt(row.id), rows.size * FETCH_ROW_MS + TYPE_MS + 120, env.fixed)
     val cell = 9.dp
     Row(Modifier.padding(vertical = 4.dp)) {
         Canvas(Modifier.padding(top = 4.dp).size(width = cell * 9, height = cell * 7)) {
@@ -353,7 +346,7 @@ private fun FetchRowView(row: FetchRow, env: RowEnv) {
         Spacer(Modifier.width(12.dp))
         Column {
             rows.forEachIndexed { i, line ->
-                val text = remember(line, palette) { styled(line, palette) }
+                val text = remember(line, palette, env.look) { styled(line, env.look, palette) }
                 BasicText(
                     text = text,
                     style = env.base,
@@ -380,7 +373,7 @@ private const val SPINNER = "|/-\\"
 private fun LaunchRowView(row: LaunchRow, env: RowEnv) {
     val palette = env.palette
     val born = env.bornAt(row.id)
-    val time = elapsedSince(born, 700)
+    val time = elapsedSince(born, 700, env.fixed)
     val turn by remember { derivedStateOf { if (time.value >= 700f) -1 else (time.value / 70f).toInt() % SPINNER.length } }
     val onLaunch by rememberUpdatedState(env.onLaunch)
     var told by remember { mutableStateOf(false) }
@@ -418,7 +411,8 @@ private fun NoteRowView(row: NoteRow, env: RowEnv) {
     val length = note.text.length
     val perChar = minOf(NOTE_CHAR_MS, NOTE_TYPE_MAX_MS / length.coerceAtLeast(1))
     val typeMs = length * perChar
-    val time = elapsedSince(env.bornAt(row.id), (typeMs + NOTE_HOLD_MS + NOTE_FADE_MS).toInt())
+    // Posed, a note is all there and still news.
+    val time = elapsedSince(env.bornAt(row.id), (typeMs + NOTE_HOLD_MS + NOTE_FADE_MS).toInt(), env.fixed?.let { typeMs / (typeMs + NOTE_HOLD_MS + NOTE_FADE_MS) })
     val typed by remember { derivedStateOf { minOf(length, (time.value / perChar).toInt()) } }
     fun faded(): Float = ((time.value - typeMs - NOTE_HOLD_MS) / NOTE_FADE_MS).coerceIn(0f, 1f)
     // The part still to come is there but invisible, so the note does not change height as it types.
@@ -430,10 +424,8 @@ private fun NoteRowView(row: NoteRow, env: RowEnv) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = 3.dp, bottom = 6.dp)
             .graphicsLayer { alpha = 1f - 0.5f * faded() }
-            .drawBehind { drawRect(lerp(palette.accent, palette.line, faded()), size = Size(2.dp.toPx(), size.height)) }
-            .padding(start = 10.dp),
+            .then(with(env.look) { Modifier.note(::faded, env.lookEnv) }),
     ) {
         Row {
             BasicText(note.app, style = env.base.copy(color = palette.app), modifier = Modifier.tap { env.onRun("open ${note.app}") })

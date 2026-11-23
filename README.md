@@ -39,7 +39,8 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 | `weather set <city>`, `weather units [c\|f]` | choose the city `weather` reports, and Celsius or Fahrenheit |
 | `weather login [on\|off]` | show the weather in the login summary, or leave it out |
 | `fetch` | a system card: Android version, device, uptime, apps, battery, storage |
-| `theme [name]` | `default`, `green`, `amber`, `eink`, `nord`, `gruvbox`, `dracula`, `solarized`, `synthwave` or `paper` |
+| `look [name]` | a whole different look: `stock`, `phosphor`, `aurora`, `teletype`, `neon`, `eink`, `hud`, `sumi`, `bbs`, `brutal`, `blueprint` or `dotmatrix` |
+| `theme [name]` | the stock look's colors: `default`, `green`, `amber`, `eink`, `nord`, `gruvbox`, `dracula`, `solarized`, `synthwave` or `paper` |
 | `saver [name]` | the lock screen's screensaver: `rain`, `stars`, `life`, `clock`, `shuffle` or `off`; `saver show` previews it |
 | `fx [on\|off]` | turn the animations on or off |
 | `ssh [user@]host [-p port]` | log in to another computer; `ssh` alone lists the ones you have used |
@@ -54,6 +55,32 @@ Then open "Terminal Launcher", run `setup`, and tap `home` to make it the defaul
 The chips above the keyboard complete what you are typing, and `↑` recalls earlier commands.
 App names in `ls` output can be tapped. A mistyped command offers the nearest match; tapping it
 puts it at the prompt.
+
+## Looks
+
+`look` lists the looks and `look <name>` switches. A look changes everything about how the
+terminal is drawn and how it moves: the typeface, the colors, the clock, the bars, and what
+happens when the screen wakes, a password is right, a line prints, an app opens and the phone
+locks. What the terminal says is the same in all of them.
+
+| Look | What it is |
+| --- | --- |
+| `stock` | the plain terminal, and the only one the color themes apply to |
+| `phosphor` | an amber tube: scanlines and glow, and the picture rolls when you unlock |
+| `aurora` | modern and soft: a slow aurora behind glass surfaces |
+| `teletype` | ink on a paper roll, with a red stamp for a right password |
+| `neon` | a synthwave sunset over a grid |
+| `eink` | calm e-paper that refreshes in steps |
+| `hud` | a cockpit display that draws its own frame |
+| `sumi` | brush and ink on handmade paper |
+| `bbs` | a 1994 bulletin board in sixteen colors |
+| `brutal` | a Swiss poster: a huge clock, black bars, one red |
+| `blueprint` | a cyanotype drawing, plotted line by line |
+| `dotmatrix` | a four-shade olive LCD |
+
+`theme` colors the stock look; the others bring their own palette. `fx off` stops the movement
+in every look and leaves the drawing. All twelve can be tried in a browser first:
+`demo/looks/index.html` plays the same scripted session in each.
 
 ## Motion
 
@@ -196,6 +223,8 @@ The command interpreter in `app/src/main/java/com/terminallauncher/shell/` is pl
 talks to the phone through the `Phone` interface, which `AndroidPhone.kt` implements. The UI is
 Jetpack Compose: `ui/TerminalScreen.kt` is the screen, `ui/Rows.kt` draws each kind of output line,
 `ui/Effects.kt` holds the timing of the animations and `ui/Savers.kt` the screensavers.
+Each look is one object in `ui/looks/`, a subclass of `Look`: `docs/writing-a-look.md` says how
+to write one, and `bash tools/shots.sh <look>` draws any moment of it on the desktop to look at.
 SSH follows the same split: `shell/Remote.kt` is what the shell asks for and how a remote shell's
 output becomes lines, and `AndroidSsh.kt` provides it with the JSch library. So does the weather:
 `shell/Weather.kt` is what the shell asks for, and `OpenMeteo.kt` fetches and reads it.
@@ -223,6 +252,11 @@ produces the same signed build locally.
 ## Credits
 
 The typeface is IBM Plex Mono, under the SIL Open Font License (`licenses/IBM-Plex-Mono-OFL.txt`).
+The looks bring their own faces, each with its license in `licenses/`: VT323, Geist Mono, Courier
+Prime, Share Tech Mono, Orbitron, Abril Fatface, Rajdhani, Shippori Mincho, DM Mono, Anton, Space
+Mono and Tiny5 under the SIL Open Font License, and Special Elite under the Apache License 2.0.
+Geist Mono and Tiny5 are single weights cut from their variable fonts, and Rajdhani, Shippori
+Mincho, Anton and Tiny5 are cut down to Latin characters.
 SSH connections are made with [JSch](https://github.com/mwiede/jsch), under BSD-style licenses
 (`licenses/JSch-LICENSE.txt`).
 Weather data is by [Open-Meteo](https://open-meteo.com), under

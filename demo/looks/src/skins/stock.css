@@ -1,0 +1,6 @@
+/* Stock: the launcher as it ships today. Everything else on the page is measured against this. */
+.tl[data-look="stock"] {
+  --bg: #000000; --fg: #d6d8d2; --dim: #7b8086; --line: #2b2e33;
+  --accent: #f0b45e; --app: #8fbaf0; --ok: #a3d18b; --err: #f58675;
+  --font: "IBM Plex Mono", ui-monospace, "Cascadia Mono", "Roboto Mono", Consolas, Menlo, monospace;
+}

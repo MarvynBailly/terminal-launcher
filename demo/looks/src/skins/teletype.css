@@ -1,0 +1,241 @@
+/*
+ * Teletype: a teleprinter typing onto a continuous roll of paper.
+ * The paper runs between two parts of the machine: the paper bail with its column scale (the status
+ * line) and the tear bar with the keys (the chips). Lines are struck at the bottom, where the prompt
+ * is, and the paper feeds upward, so the page hangs from the bottom of the screen.
+ *
+ * One line of paper is 1.5em = 5.19cqw: the tractor holes sit a line apart.
+ */
+.tl[data-look="teletype"] {
+  --bg: #efe7d5; --fg: #25211d; --dim: #5f584c; --line: #cdc3ab;
+  --accent: #b1271f; --app: #2a3d63; --ok: #2c6249; --err: #c21d16;
+  --font: "Courier Prime", "Courier New", Courier, monospace;
+  --weight: 400; --lh: 1.5; --pad: 6.2cqw;
+  --tt-p: 5.19cqw;
+  --tt-cream: #ded4bc;
+  --tt-col: 0;
+  --tt-blot: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='m' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='.045' numOctaves='4' seed='5' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.6 0 0 0 -.42'/></filter><rect width='200' height='200' filter='url(%23m)'/></svg>");
+  background: #0c0b0a;
+}
+.tl[data-look="teletype"] .tl-screen { padding: 0; font-size: 3.46cqw; }
+.tl[data-look="teletype"][data-scene="off"] .tl-bg { visibility: hidden; }
+
+/* ---------------- behind the text: the machine and the paper ---------------- */
+
+.tl[data-look="teletype"] .tt-platen {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to bottom, rgba(0,0,0,0) calc(100% - 52cqw), #24211d calc(100% - 38cqw), #3b3631 calc(100% - 30cqw), #1b1916 calc(100% - 18cqw), #090807 100%),
+    repeating-linear-gradient(to bottom, #141210 0 2.4cqw, #181613 2.4cqw 2.6cqw),
+    #141210;
+}
+.tl[data-look="teletype"] .tt-paper { position: absolute; inset: 0; }
+.tl[data-look="teletype"] .tt-sheet {
+  position: absolute; left: 0; right: 0; top: -110cqw; height: calc(100cqh + 370cqw);
+  will-change: transform;
+  background:
+    radial-gradient(circle at 50% 50%, #191714 0, #191714 0.98cqw, rgba(70,52,30,.55) 1.08cqw, rgba(70,52,30,0) 1.4cqw) 0 0 / 5.4cqw var(--tt-p) repeat-y,
+    radial-gradient(circle at 50% 50%, #191714 0, #191714 0.98cqw, rgba(70,52,30,.55) 1.08cqw, rgba(70,52,30,0) 1.4cqw) 100% 0 / 5.4cqw var(--tt-p) repeat-y,
+    repeating-linear-gradient(to bottom, rgba(92,72,44,.38) 0 calc(var(--tt-p) / 8), rgba(92,72,44,0) calc(var(--tt-p) / 8) calc(var(--tt-p) / 4)) 5.15cqw 0 / max(1px, 0.16cqw) 100% no-repeat,
+    repeating-linear-gradient(to bottom, rgba(92,72,44,.38) 0 calc(var(--tt-p) / 8), rgba(92,72,44,0) calc(var(--tt-p) / 8) calc(var(--tt-p) / 4)) calc(100% - 5.15cqw) 0 / max(1px, 0.16cqw) 100% no-repeat,
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='.34' numOctaves='2' seed='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .4 0 0 0 0 .3 0 0 0 0 .16 .4 0 0 0 -.17'/></filter><filter id='f' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='.022 .5' numOctaves='2' seed='11' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .42 0 0 0 0 .31 0 0 0 0 .16 .55 0 0 0 -.3'/></filter><filter id='g' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'><feTurbulence type='fractalNoise' baseFrequency='.5 .03' numOctaves='1' seed='29' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 .98 0 0 0 0 .92 .7 0 0 0 -.36'/></filter><rect width='240' height='240' filter='url(%23n)'/><rect width='240' height='240' filter='url(%23f)'/><rect width='240' height='240' filter='url(%23g)'/></svg>") 0 0 / calc(var(--tt-p) * 8) calc(var(--tt-p) * 8),
+    var(--bg);
+}
+/* the stripe that warns the roll is running out: it sits behind the tear bar until the paper feeds out */
+.tl[data-look="teletype"] .tt-end { position: absolute; left: 0; right: 0; bottom: 3.4cqw; height: 2.6cqw; background: rgba(177,39,31,.42); }
+/* the lamp over the paper: brightest under the bail, falling off toward the corners */
+.tl[data-look="teletype"] .tt-paper::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(88% 40% at 50% 9%, rgba(255,251,236,.6), rgba(255,251,236,0) 100%),
+    radial-gradient(125% 82% at 50% 30%, rgba(58,40,16,0) 52%, rgba(58,40,16,.25) 100%),
+    linear-gradient(to bottom, rgba(58,40,16,0) 45%, rgba(58,40,16,.12));
+}
+
+/* ---------------- the paper bail: status and the column scale ---------------- */
+
+.tl[data-look="teletype"] .tl-status {
+  position: relative; z-index: 2;
+  padding: 6.3cqw var(--pad) 5cqw;
+  background: linear-gradient(to bottom, #131210, #23201d 62%, #2c2925);
+  border-bottom: max(1px, 0.07em) solid #7d7667;
+  box-shadow: 0 0.55em 1em -0.3em rgba(44,28,8,.55);
+  color: var(--tt-cream); font-size: 0.84em; letter-spacing: 0.02em;
+}
+.tl[data-look="teletype"] .tl-status-l { color: #a79e89; }
+/* a tick for every column, a longer one every fifth, numbered every tenth */
+.tl[data-look="teletype"] .tl-status::after {
+  content: ""; position: absolute; left: var(--pad); bottom: 0; width: 87.19cqw; height: 3.737cqw; opacity: .78;
+  background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 420 18' fill='%23ded4bc' stroke='%23ded4bc'><path d='M4.4 15h416' stroke-width='6' stroke-dasharray='1.2 8.8'/><path d='M44.4 13h376' stroke-width='10' stroke-dasharray='1.2 48.8'/><text y='6.6' font-size='7.6' stroke='none' text-anchor='middle' font-family='Courier New,monospace'><tspan x='95'>10</tspan><tspan x='195'>20</tspan><tspan x='295'>30</tspan><tspan x='395'>40</tspan></text></svg>") 0 0 / 100% 100% no-repeat;
+}
+/* the carriage pointer: it rides the scale to the column the next key will land in */
+.tl[data-look="teletype"] .tl-status::before {
+  content: ""; position: absolute; z-index: 1; left: var(--pad); bottom: -1.75cqw; width: 2.076cqw; height: 1.75cqw;
+  background: var(--accent); clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform: translateX(calc(var(--tt-col) * 2.076cqw));
+  transition: transform 110ms cubic-bezier(.3,.7,.3,1);
+}
+
+/* ---------------- the page ---------------- */
+
+.tl[data-look="teletype"] .tl-body { justify-content: flex-end; padding-bottom: 0.5em; }
+.tl[data-look="teletype"] .tl-lines, .tl[data-look="teletype"] .tl-prompt { padding-inline: var(--pad); }
+/* the print line keeps its place when the prompt is away, so the page never jumps */
+.tl[data-look="teletype"] .tl-prompt[hidden] { display: block !important; visibility: hidden; }
+
+.tl[data-look="teletype"] .tl-line.tl-in { animation: none; }
+
+/* every character is its own strike (the script wraps them): some heavy, some faint, some off the line */
+.tl[data-look="teletype"] .c { display: inline-block; }
+.tl[data-look="teletype"] .c.h { text-shadow: 0.014em 0 0 currentColor, 0 0 0.03em currentColor; }
+.tl[data-look="teletype"] .c.l { color: color-mix(in srgb, currentColor 80%, transparent); }
+.tl[data-look="teletype"] .c.u { transform: translateY(-0.03em); }
+.tl[data-look="teletype"] .c.d { transform: translateY(0.038em); }
+.tl[data-look="teletype"] .c.r { transform: rotate(-1.3deg); }
+.tl[data-look="teletype"] .tl-line.tl-in .c { animation: teletype-strike 120ms linear backwards; animation-delay: calc(var(--n) * 4ms); }
+@keyframes teletype-strike {
+  0% { visibility: hidden; }
+  1% { visibility: visible; text-shadow: 0.035em 0.05em 0 currentColor, -0.02em 0 0 currentColor, 0 0 0.16em currentColor; }
+}
+
+.tl[data-look="teletype"] .tl-line[data-role="lock-date"] > span { border-bottom: max(1px, 0.1em) solid var(--accent); }
+.tl[data-look="teletype"] .is-tap .s-app { border-bottom: max(1px, 0.07em) solid color-mix(in srgb, var(--app) 50%, transparent); }
+.tl[data-look="teletype"] .s-ok, .tl[data-look="teletype"] .s-accent { font-weight: 700; }
+
+/* the clock: typewriter art, every cell two columns of M struck over with W, twice, half a line apart */
+.tl[data-look="teletype"] .tl-clock { display: block; padding-block: 0.95em 0.8em; }
+.tl[data-look="teletype"] .tl-clock-grid { position: relative; display: grid; grid-template-columns: repeat(17, 2ch); gap: 0; width: fit-content; font-weight: 700; }
+/* the ink that soaked in under all those strikes: one shape, drawn by the script */
+.tl[data-look="teletype"] .tt-soak { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; fill: var(--fg); opacity: .5; }
+.tl[data-look="teletype"] .tl-clock-grid i { position: relative; aspect-ratio: auto; height: 1.15em; font-style: normal; }
+.tl[data-look="teletype"] .tl-clock-grid i.on { background: none; }
+.tl[data-look="teletype"] .tl-clock-grid i.on::before,
+.tl[data-look="teletype"] .tl-clock-grid i.on::after {
+  content: "MM"; position: absolute; left: 0; top: 0; line-height: 0.575em; color: var(--fg);
+  text-shadow: 0 0.575em 0 currentColor;
+}
+.tl[data-look="teletype"] .tl-clock-grid i.on::after { content: "WW"; }
+.tl[data-look="teletype"] .tl-clock-grid i.on:nth-child(3n)::before { opacity: .8; }
+.tl[data-look="teletype"] .tl-clock-grid i.on:nth-child(4n+1)::after { opacity: .72; transform: translateY(0.03em); }
+.tl[data-look="teletype"] .tl-clock-grid i.on:nth-child(7n+2)::before { transform: translate(0.03em, -0.035em); }
+.tl[data-look="teletype"] .tl-clock-grid i.on:nth-child(5n+3)::after { transform: translateX(-0.03em); }
+
+/* gauges: the same overstrike for what is used, typed blanks for what is left */
+.tl[data-look="teletype"] .tl-gauge { align-items: baseline; }
+.tl[data-look="teletype"] .tl-gauge-bar { display: inline-flex; width: auto; height: auto; gap: 0; font-weight: 700; }
+.tl[data-look="teletype"] .tl-gauge-bar i { position: relative; display: inline-block; width: 1ch; background: none; font-style: normal; color: var(--dim); }
+.tl[data-look="teletype"] .tl-gauge-bar i::before { content: "_"; opacity: .55; }
+.tl[data-look="teletype"] .tl-gauge-bar i.on { background: none; color: var(--fg); }
+.tl[data-look="teletype"] .tl-gauge-bar i.on::before { content: "M"; opacity: 1; }
+.tl[data-look="teletype"] .tl-gauge-bar i.on::after { content: "W"; position: absolute; left: 0; top: 0; }
+.tl[data-look="teletype"] .tl-gauge-bar i.on:nth-child(3n+1)::after { opacity: .7; }
+.tl[data-look="teletype"] .tl-gauge-bar i.on:nth-child(4n+3)::before { transform: translateY(0.04em); display: inline-block; }
+.tl[data-look="teletype"] .tl-gauge-bar i.on:nth-child(5n+2) { text-shadow: 0.03em 0 0 currentColor; }
+.tl[data-look="teletype"] .tl-gauge.is-alert .tl-gauge-bar i.on { background: none; color: var(--err); }
+.tl[data-look="teletype"] .tl-gauge.tl-in .tl-gauge-bar i,
+.tl[data-look="teletype"] .tl-gauge.tl-in .tl-gauge-bar i.on { animation: teletype-strike 120ms linear backwards; animation-delay: calc((6 + var(--i)) * 4ms); }
+.tl[data-look="teletype"] .tl-gauge.tl-in .tl-gauge-note { animation: none; }
+
+/* ls: three columns of fourteen, printed a row at a time while the paper steps up under it */
+.tl[data-look="teletype"] .tl-grid { grid-template-columns: repeat(3, 14ch); }
+.tl[data-look="teletype"] .tl-app { padding-block: 0.3em; text-overflow: clip; }
+.tl[data-look="teletype"] .tl-grid.tl-in .tl-app { animation: none; }
+.tl[data-look="teletype"] .tl-grid.tl-in .tl-app .c { animation-delay: calc(70ms + var(--row) * 135ms + var(--col) * 30ms + var(--n) * 3ms); }
+
+/* a notification: a slip torn off a pad and pinned to the page */
+.tl[data-look="teletype"] .tl-note {
+  position: relative; z-index: 0; width: fit-content; max-width: 100%;
+  margin: 1em 0 1em 1ch; padding: 0.95em 1.6ch 0.6em; border: 0;
+  transform: rotate(-1.3deg); transform-origin: 50% 0.5em;
+}
+.tl[data-look="teletype"] .tl-note::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(to bottom, #fffaf0, #f8f1e0);
+  clip-path: polygon(0 0.16em, 4% 0.02em, 9% 0.2em, 15% 0.06em, 22% 0.24em, 28% 0.1em, 36% 0.2em, 43% 0, 51% 0.18em, 58% 0.07em, 66% 0.22em, 73% 0.04em, 81% 0.2em, 88% 0.09em, 95% 0.22em, 100% 0.05em,
+    100% calc(100% - 0.14em), 94% calc(100% - 0.02em), 87% calc(100% - 0.2em), 79% calc(100% - 0.06em), 70% calc(100% - 0.22em), 62% calc(100% - 0.04em), 53% calc(100% - 0.18em), 45% 100%, 37% calc(100% - 0.2em), 29% calc(100% - 0.05em), 20% calc(100% - 0.22em), 12% calc(100% - 0.03em), 5% calc(100% - 0.17em), 0 calc(100% - 0.04em));
+}
+.tl[data-look="teletype"] .tl-note::after {
+  content: ""; position: absolute; inset: 0.5em 0.5ch 0.25em; z-index: -2;
+  box-shadow: 0 0.3em 0.7em rgba(50,34,12,.5), 0 0.05em 0.15em rgba(50,34,12,.35);
+}
+.tl[data-look="teletype"] .tl-note-app { display: block; margin: 0; font-weight: 700; }
+.tl[data-look="teletype"] .tl-note-app::before {
+  content: ""; position: absolute; left: calc(50% - 0.45em); top: -0.2em; width: 0.9em; height: 0.9em; border-radius: 50%;
+  background: radial-gradient(circle at 36% 30%, #ffb3a6 0, #d43a2f 26%, #a81f18 62%, #6f100c 100%);
+  box-shadow: 0.14em 0.34em 0.28em rgba(40,20,6,.5);
+}
+.tl[data-look="teletype"] .tl-note.tl-in { animation: teletype-slip 380ms cubic-bezier(.2,.9,.3,1.15) backwards; }
+.tl[data-look="teletype"] .tl-note.tl-in .c { animation: none; }
+.tl[data-look="teletype"] .tl-note.tl-in .tl-note-app::before { animation: teletype-pin 200ms 330ms cubic-bezier(.5,0,.9,.4) backwards; }
+@keyframes teletype-slip { from { opacity: 0; transform: translate(7ch, -3em) rotate(9deg) scale(1.14); } }
+@keyframes teletype-pin { from { opacity: 0; transform: translate(0.5em, -1.8em) scale(2.1); } }
+
+/* a launch: the spinner is typed, one stroke over the last */
+.tl[data-look="teletype"] .tl-launch-text { font-weight: 700; }
+.tl[data-look="teletype"] .tl-spin { width: 1ch; height: auto; margin-left: 1ch; border: 0; border-radius: 0; animation: none; color: var(--accent); font-weight: 700; }
+.tl[data-look="teletype"] .tl-spin::before { content: "|"; animation: teletype-spin 0.44s steps(1) infinite; }
+@keyframes teletype-spin { 0% { content: "|"; } 25% { content: "/"; } 50% { content: "-"; } 75% { content: "\\"; } }
+
+/* the prompt: the ribbon waits where the next key will strike */
+.tl[data-look="teletype"] .tl-ps { font-weight: 700; }
+.tl[data-look="teletype"] .tl-cursor {
+  width: 1ch; height: 1.12em; margin-left: 0.04ch; border-radius: 0.06em;
+  background: repeating-linear-gradient(to bottom, var(--accent) 0 0.11em, #c5372d 0.11em 0.16em);
+  animation: teletype-wait 1.3s ease-in-out infinite;
+}
+@keyframes teletype-wait { 0%, 45% { opacity: .92; } 70% { opacity: .28; } 100% { opacity: .92; } }
+
+/* ---------------- the tear bar and the keys ---------------- */
+
+.tl[data-look="teletype"] .tl-chips {
+  position: relative; z-index: 2; overflow: visible;
+  gap: 0.6em; align-items: center; min-height: 4.5em; padding: 0.95em var(--pad) 1.25em;
+  background:
+    linear-gradient(to bottom, rgba(255,240,210,.09), rgba(255,240,210,0) 0.5em),
+    repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 0.34em, rgba(0,0,0,.28) 0.34em 0.42em),
+    linear-gradient(to bottom, #2d2a26, #1c1a17 40%, #100f0d);
+  border-top: max(1px, 0.07em) solid #6e685c;
+  box-shadow: 0 -0.2em 0.6em rgba(40,26,8,.34);
+}
+/* the serrated edge the paper is torn against */
+.tl[data-look="teletype"] .tl-chips::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 0.36em;
+  background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' preserveAspectRatio='none'><path d='M0 6L5 0L10 6z' fill='%23a59f91'/><path d='M5 0L10 6H7z' fill='%23605b51'/></svg>") 0 0 / 0.62em 100% repeat-x;
+}
+.tl[data-look="teletype"] .tl-chip {
+  padding: 0.3em 0.95em 0.22em; border: max(1px, 0.1em) solid #948d7c; border-radius: 1.2em;
+  background: radial-gradient(120% 140% at 50% 0%, #3a3632, #191715 70%);
+  box-shadow: 0 0.16em 0.3em rgba(0,0,0,.7), inset 0 0.1em 0.12em rgba(255,255,255,.16), inset 0 -0.14em 0.2em rgba(0,0,0,.5);
+  color: var(--tt-cream); font-size: 0.94em;
+}
+.tl[data-look="teletype"] .tl-chip.is-app { color: var(--tt-cream); }
+.tl[data-look="teletype"] .tl-chip.is-cmd { background: radial-gradient(120% 140% at 50% 0%, #fbf5e6, #d6ccb3 75%); color: #26221e; border-color: #8a8372; box-shadow: 0 0.16em 0.3em rgba(0,0,0,.7), inset 0 0.1em 0.12em rgba(255,255,255,.7), inset 0 -0.14em 0.2em rgba(90,70,40,.35); }
+.tl[data-look="teletype"] .tl-chip.is-key { padding-inline: 0.72em; background: radial-gradient(120% 140% at 50% 0%, #cf3b30, #8c1b15 75%); border-color: #a39c8b; color: #fff3e0; }
+
+/* ---------------- over everything, only during a transition ---------------- */
+
+.tl[data-look="teletype"] .tt-dark { position: absolute; inset: 0; background: radial-gradient(120% 70% at 50% 0%, #2a180a, #0e0804 75%); mix-blend-mode: multiply; }
+.tl[data-look="teletype"] .tt-glow { position: absolute; inset: 0; background: radial-gradient(95% 46% at 50% 4%, rgba(255,232,180,.75), rgba(255,232,180,0)); }
+.tl[data-look="teletype"] .tt-fade { position: absolute; inset: 0; background: #101216; }
+.tl[data-look="teletype"] .tt-black { position: absolute; inset: 0; background: #0c0b0a; }
+
+/* the rubber stamp */
+.tl[data-look="teletype"] .tt-carry { position: absolute; left: 54%; width: 0; height: 0; }
+.tl[data-look="teletype"] .tt-stamp { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%) rotate(-7deg); }
+.tl[data-look="teletype"] .tt-stamp-ink {
+  display: block; width: min-content; padding: 2.9cqw 4.6cqw 1.5cqw; text-align: center;
+  border: 0.85cqw solid currentColor; border-radius: 1.7cqw; outline: 0.3cqw solid currentColor; outline-offset: 0.75cqw;
+  font: 400 11.4cqw/1.04 "Special Elite", "Courier Prime", "Courier New", monospace; letter-spacing: 0.04em; text-transform: uppercase;
+  color: #b1271f; opacity: .9; mix-blend-mode: multiply;
+  -webkit-mask-image: var(--tt-blot); mask-image: var(--tt-blot);
+  -webkit-mask-size: 46cqw 46cqw; mask-size: 46cqw 46cqw;
+}
+.tl[data-look="teletype"] .tt-stamp-die {
+  position: absolute; inset: -1.6cqw; border-radius: 2.6cqw; opacity: 0;
+  background: linear-gradient(165deg, #74332a, #45170f 60%, #2c0d08);
+  box-shadow: 0 3cqw 5cqw rgba(20,8,2,.55);
+}
+.tl[data-look="teletype"] .tt-stamp-mist {
+  position: absolute; inset: -6cqw; border-radius: 50%; opacity: 0;
+  background: radial-gradient(closest-side, rgba(177,39,31,.34), rgba(177,39,31,0));
+}

@@ -1,0 +1,327 @@
+/*
+ * Flight Deck: a head-up display on a canopy. Fine linework in one cool colour, amber for the pilot's own
+ * marks (prompt, carets, callouts), red for alerts. The left scale counts rows and the bottom one columns.
+ */
+.tl[data-look="hud"] {
+  --bg: #060a0f; --fg: #cfe9f4; --dim: #6c90a2; --line: #1f3f4e;
+  --accent: #ffb23e; --app: #55d8ff; --ok: #7cf0dc; --err: #ff5145;
+  --font: "Share Tech Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --weight: 400; --lh: 1.5; --pad: 5.8cqw;
+  --face: "Rajdhani", "Chakra Petch", system-ui, sans-serif;
+  --h: max(1px, .26cqw);       /* a hairline */
+  --w: var(--h);               /* how thick a bracket is drawn */
+  --k: rgba(85,216,255,.7);    /* a bracket's colour */
+  --s: .75em;                  /* a bracket's arm */
+}
+.tl[data-look="hud"][data-scene="off"] { background: #020304; }
+.tl[data-look="hud"][data-scene="off"] :is(.tl-bg, .tl-fx) { opacity: 0; }
+
+/* ---- the ground: a glow, and scan lines on whole pixels so they never beat ---- */
+.tl[data-look="hud"] .tl-bg {
+  --l: max(1px, round(.26cqw, 1px)); --p: max(3px, round(.78cqw, 1px));
+  background:
+    repeating-linear-gradient(rgba(150,225,255,.04) 0 var(--l), transparent var(--l) var(--p)),
+    radial-gradient(110cqw 90cqw at 52% 46%, rgba(38,104,140,.2), transparent 72%),
+    linear-gradient(#070d14, #04070a);
+}
+
+/* ---- the frame, the scales and their carets (built in mount) ---- */
+.tl[data-look="hud"] .hud-deck { position: absolute; inset: 0; }
+.tl[data-look="hud"] :is(.hud-deck, .hud-frame, .hud-sy, .hud-sx, .hud-track) > * { position: absolute; }
+.tl[data-look="hud"] .hud-frame { left: 7cqw; top: 13cqw; right: 2.6cqw; bottom: 19.2cqw; filter: drop-shadow(0 0 .8cqw rgba(85,216,255,.4)); }
+/* an outline with two clipped corners: cut them off, then draw each cut with a band of gradient */
+.tl[data-look="hud"] .hud-rim,
+.tl[data-look="hud"] .tl-chip {
+  --d: calc(var(--c) * .7071 + var(--h) * 1.3);
+  border: var(--h) solid var(--e); border-radius: 0;
+  clip-path: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+  background: linear-gradient(135deg, var(--e) 0 var(--d), transparent 0) border-box, linear-gradient(-45deg, var(--e) 0 var(--d), transparent 0) border-box;
+}
+.tl[data-look="hud"] .hud-rim { inset: 0; --c: 4.2cqw; --e: rgba(85,216,255,.34); }
+.tl[data-look="hud"] .hud-k { --c: 4.2cqw; --d: calc(var(--c) * .7071 + .56cqw); width: 6.4cqw; height: 6.4cqw; border: 0 solid var(--app); }
+.tl[data-look="hud"] :is(.hud-k1, .hud-k3) { width: 9cqw; height: 9cqw; }
+.tl[data-look="hud"] .hud-k1 {
+  left: 0; top: 0; border-width: .52cqw 0 0 .52cqw;
+  clip-path: polygon(var(--c) 0, 100% 0, 100% 100%, 0 100%, 0 var(--c));
+  background: linear-gradient(135deg, var(--app) 0 var(--d), transparent 0) border-box;
+}
+.tl[data-look="hud"] .hud-k2 { right: 0; top: 0; border-width: .52cqw .52cqw 0 0; }
+.tl[data-look="hud"] .hud-k3 {
+  right: 0; bottom: 0; border-width: 0 .52cqw .52cqw 0;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%);
+  background: linear-gradient(-45deg, var(--app) 0 var(--d), transparent 0) border-box;
+}
+.tl[data-look="hud"] .hud-k4 { left: 0; bottom: 0; border-width: 0 0 .52cqw .52cqw; }
+.tl[data-look="hud"] .hud-n { width: 1.1cqw; height: 1.1cqw; background: var(--app); transform: translate(-50%, -50%) rotate(45deg); }
+.tl[data-look="hud"] .hud-n1 { left: 100%; top: 50%; }
+.tl[data-look="hud"] .hud-n2 { left: 50%; top: 100%; }
+/* on the right edge: how much of the scrollback is on screen, and where */
+.tl[data-look="hud"] .hud-track { right: 0; top: 9cqw; bottom: 11.5cqw; width: .52cqw; }
+.tl[data-look="hud"] .hud-track i {
+  left: 0; right: 0; top: 0; height: 100%; background: var(--app); opacity: 0;
+  transition: top .3s cubic-bezier(.2,.8,.2,1), height .3s cubic-bezier(.2,.8,.2,1), opacity .3s;
+}
+.tl[data-look="hud"] .hud-track i.on { opacity: .9; }
+
+.tl[data-look="hud"] .hud-sy { left: .6cqw; top: 15.6cqw; width: 4.8cqw; bottom: 21.6cqw; }
+.tl[data-look="hud"] .hud-sx { left: 10.2cqw; bottom: 1.5cqw; width: 83.6cqw; height: 6cqw; }
+.tl[data-look="hud"] :is(.hud-sy, .hud-sx) i { --t: .9cqw; background: rgba(85,216,255,.4); }
+.tl[data-look="hud"] :is(.hud-sy, .hud-sx) i.r { --t: 1.5cqw; background: rgba(85,216,255,.62); }
+.tl[data-look="hud"] :is(.hud-sy, .hud-sx) i.m { --t: 2.1cqw; background: var(--app); }
+.tl[data-look="hud"] :is(.hud-sy, .hud-sx) b { font: 400 2.05cqw/1 var(--font); color: var(--dim); }
+.tl[data-look="hud"] .hud-sy i { right: 0; width: var(--t); height: var(--h); }
+.tl[data-look="hud"] .hud-sy b { right: 2.55cqw; margin-top: -.95cqw; }
+.tl[data-look="hud"] .hud-sx i { top: 0; width: var(--h); height: var(--t); }
+.tl[data-look="hud"] .hud-sx b { top: 2.9cqw; transform: translateX(-50%); }
+.tl[data-look="hud"] .hud-cy {
+  left: 5.25cqw; top: 50%; width: 1.5cqw; height: 2cqw; margin-top: -1cqw;
+  background: var(--accent); clip-path: polygon(0 50%, 100% 0, 100% 100%);
+  transition: top .24s cubic-bezier(.3,1.45,.5,1);
+}
+.tl[data-look="hud"] .hud-cx {
+  left: 12%; top: calc(100cqh - 9.3cqw); width: 2cqw; height: 1.5cqw; margin-left: -1cqw;
+  background: var(--accent); clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transition: left .14s cubic-bezier(.3,1.45,.5,1);
+}
+/* a small reticle where the row scale begins */
+.tl[data-look="hud"] .hud-eye {
+  left: 1.3cqw; top: 6.9cqw; width: 4.2cqw; height: 4.2cqw;
+  background:
+    linear-gradient(to right, var(--app) 0 24%, transparent 0 76%, var(--app) 0) 50% / 100% var(--h) no-repeat,
+    linear-gradient(var(--app) 0 24%, transparent 0 76%, var(--app) 0) 50% / var(--h) 100% no-repeat;
+}
+.tl[data-look="hud"] .hud-eye::before { content: ""; position: absolute; inset: .85cqw; border: var(--h) solid var(--app); border-radius: 50%; }
+.tl[data-look="hud"] .hud-eye::after { content: ""; position: absolute; inset: 1.8cqw; background: var(--accent); }
+
+/* ---- the terminal ---- */
+/* labels are set in the squared face, in tracked capitals */
+.tl[data-look="hud"] :is(.tl-status, .tl-gauge-label, .tl-note-app, [data-role="lock-title"], [data-role="lock-date"]) {
+  font: 600 .84em/1 var(--face); letter-spacing: .16em; text-transform: uppercase;
+}
+.tl[data-look="hud"] .tl-screen { padding: 5cqw 5.8cqw 9.6cqw 10.2cqw; text-shadow: 0 0 .6em color-mix(in srgb, currentColor 34%, transparent); }
+.tl[data-look="hud"] .tl-status {
+  height: 8cqw; padding: 0; margin: 0 -3.2cqw; align-items: center;
+}
+.tl[data-look="hud"] .tl-status-l { color: var(--app); }
+.tl[data-look="hud"] .tl-status-l::before {
+  content: ""; display: inline-block; width: .5em; height: .56em; margin-right: .6em;
+  background: var(--accent); clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+.tl[data-look="hud"] .tl-body { padding: 2.6cqw 0 2.4cqw; }
+/* wider than its text: room inside the clip for a line's bracket and a callout's leader */
+.tl[data-look="hud"] .tl-lines { margin-inline: -1.2em; padding-inline: 1.2em; }
+.tl[data-look="hud"] .tl-line { position: relative; }
+.tl[data-look="hud"] .tl-text { width: fit-content; max-width: 100%; }
+
+/* an empty line is a divider: a hairline that ends in two nodes */
+.tl[data-look="hud"] .tl-text.is-blank { width: auto; }
+.tl[data-look="hud"] .tl-line.is-blank::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: .3em; margin-top: -.15em; transform-origin: 0;
+  background:
+    linear-gradient(var(--dim) 0 0) 0 / .3em 100% no-repeat, linear-gradient(var(--dim) 0 0) 100% / .3em 100% no-repeat,
+    linear-gradient(var(--line) 0 0) 50% / 100% var(--h) no-repeat;
+}
+.tl[data-look="hud"] .tl-line.is-blank.tl-in { animation: none; }
+.tl[data-look="hud"] .tl-line.is-blank.tl-in::before { animation: hud-rule .34s cubic-bezier(.2,.8,.2,1) backwards; }
+@keyframes hud-rule { from { transform: scaleX(0); } }
+
+/* a line arrives: a bracket opens at its left, the text resolves behind a scanning bar */
+.tl[data-look="hud"] :is(.tl-text.tl-in:not(.is-blank), .tl-launch.tl-in) { animation: hud-resolve .3s linear backwards; }
+.tl[data-look="hud"] :is(.tl-text.tl-in:not(.is-blank), .tl-launch.tl-in)::before {
+  content: ""; position: absolute; left: -.85em; top: .2em; bottom: .2em; width: .38em;
+  border: var(--h) solid var(--app); border-right: 0; opacity: 0;
+  animation: hud-bracket .48s linear backwards;
+}
+.tl[data-look="hud"] :is(.tl-text.tl-in:not(.is-blank), .tl-launch.tl-in)::after {
+  content: ""; position: absolute; inset: 0; opacity: 0;
+  border-right: .14em solid #e6f9ff; background: linear-gradient(to left, rgba(85,216,255,.22), transparent 2.6em);
+  animation: hud-scan .3s linear backwards;
+}
+@keyframes hud-resolve { 0%, 22% { clip-path: inset(-.3em 100% -.3em -1.1em); } 100% { clip-path: inset(-.3em 0% -.3em -1.1em); } }
+@keyframes hud-scan {
+  0%, 22% { opacity: 1; transform: translateX(-100%); clip-path: inset(0 0 0 100%); }
+  99% { opacity: 1; }
+  100% { opacity: 0; transform: none; clip-path: inset(0 0 0 0); }
+}
+@keyframes hud-bracket { 0% { opacity: 1; transform: scaleY(0); } 16% { opacity: 1; transform: none; } 74% { opacity: 1; } 100% { opacity: 0; } }
+/* coming online: a flash, a dark beat, then on */
+@keyframes hud-on { 0% { opacity: 0; } 8% { opacity: .85; } 16%, 40% { opacity: .1; } 48% { opacity: 1; } 60% { opacity: .4; } 72% { opacity: 1; } }
+
+/* a typed command heads its own section: a rule runs from it to a node */
+.tl[data-look="hud"] .tl-echo { display: flex; align-items: center; white-space: pre; color: #f1fbff; }
+.tl[data-look="hud"] .tl-echo::after {
+  content: ""; flex: 1; min-width: 1em; height: .3em; margin-left: 1.4ch; opacity: .8;
+  background: linear-gradient(var(--accent) 0 0) 100% / .3em 100% no-repeat, linear-gradient(to right, var(--line), rgba(255,178,62,.45)) 50% / 100% var(--h) no-repeat;
+}
+/* something tappable sits in a bracket of its own */
+.tl[data-look="hud"] .tl-line.is-tap {
+  --g: linear-gradient(var(--k) 0 0);
+  padding: .28em 0 .28em 1.5ch;
+  background: var(--g) 0 .3em / var(--h) calc(100% - .6em) no-repeat, var(--g) 0 .3em / .45em var(--h) no-repeat, var(--g) 0 calc(100% - .3em) / .45em var(--h) no-repeat;
+}
+.tl[data-look="hud"] .tl-line[data-role="wait"]::after {
+  content: ""; display: inline-block; width: 3.4em; height: .3em; margin-left: 1.2ch; vertical-align: .14em;
+  background: linear-gradient(to right, transparent, var(--app), transparent) 0 0 / 40% 100% no-repeat, var(--line);
+  animation: hud-seek .7s linear infinite;
+}
+@keyframes hud-seek { from { background-position: -67% 0; } to { background-position: 167% 0; } }
+
+/* ---- gauges: segments, a caret above, ticks beneath; a run of them shares one set of brackets ---- */
+.tl[data-look="hud"] .tl-gauge { --g: linear-gradient(var(--k) 0 0); height: 2.3em; padding-inline: .8em; }
+.tl[data-look="hud"] .tl-gauge:not(.tl-gauge + .tl-gauge) {
+  height: 2.75em; margin-top: .3em; padding-top: .45em;
+  background:
+    var(--g) 0 0 / var(--s) var(--h) no-repeat, var(--g) 0 0 / var(--h) var(--s) no-repeat,
+    var(--g) 100% 0 / var(--s) var(--h) no-repeat, var(--g) 100% 0 / var(--h) var(--s) no-repeat;
+}
+.tl[data-look="hud"] .tl-gauge:not(:has(+ .tl-gauge)) {
+  height: 2.65em; margin-bottom: .3em; padding-bottom: .35em;
+  background:
+    var(--g) 0 100% / var(--s) var(--h) no-repeat, var(--g) 0 100% / var(--h) var(--s) no-repeat,
+    var(--g) 100% 100% / var(--s) var(--h) no-repeat, var(--g) 100% 100% / var(--h) var(--s) no-repeat;
+}
+.tl[data-look="hud"] .tl-gauge-label { width: 4.3em; font-size: .82em; }
+.tl[data-look="hud"] .tl-gauge-bar { position: relative; width: 17ch; height: .5em; gap: .16em; }
+.tl[data-look="hud"] .tl-gauge-bar i { position: relative; background: none; box-shadow: inset 0 0 0 var(--h) var(--line); }
+.tl[data-look="hud"] .tl-gauge-bar i.on { background: var(--app); box-shadow: 0 0 .55em rgba(85,216,255,.5); }
+.tl[data-look="hud"] .tl-gauge-bar i::after,
+.tl[data-look="hud"] .tl-gauge-bar i:last-child::before {
+  content: ""; position: absolute; left: 0; top: calc(100% + .16em); width: var(--h); height: .16em; background: var(--dim); opacity: .75;
+}
+.tl[data-look="hud"] .tl-gauge-bar i:nth-child(7n + 1)::after { height: .34em; }
+.tl[data-look="hud"] .tl-gauge-bar i:last-child::before { left: auto; right: 0; height: .34em; }
+.tl[data-look="hud"] .tl-gauge-bar::before {
+  content: ""; position: absolute; left: calc(var(--pct) * 1%); top: -.56em; width: .6em; height: .38em; margin-left: -.3em;
+  background: #eafaff; clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.tl[data-look="hud"] .tl-gauge-note { color: var(--fg); opacity: .86; }
+/* over budget: hazard stripes, cut into the same segments */
+.tl[data-look="hud"] .tl-gauge.is-alert .tl-gauge-bar i.on { background: none; box-shadow: none; }
+.tl[data-look="hud"] .tl-gauge.is-alert .tl-gauge-bar::after {
+  --p: calc((17ch + .16em) / 14);
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--filled) * var(--p) - .16em);
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 .17em, #a3160f .17em .34em);
+  mask: repeating-linear-gradient(to right, #000 0 calc(var(--p) - .16em), transparent 0 var(--p));
+}
+.tl[data-look="hud"] .tl-gauge.is-alert .tl-gauge-bar::before { background: var(--err); }
+.tl[data-look="hud"] .tl-gauge.is-alert :is(.tl-gauge-label, .tl-gauge-note) { color: var(--err); opacity: 1; }
+/* arriving: the caret sweeps to its value and a little past it */
+.tl[data-look="hud"] .tl-gauge.tl-in :is(.tl-gauge-label, .tl-gauge-note) { animation: hud-on .34s step-end backwards; }
+.tl[data-look="hud"] .tl-gauge.tl-in .tl-gauge-bar i.on { animation: hud-seg .22s linear backwards; animation-delay: calc(120ms + var(--i) * 28ms); }
+.tl[data-look="hud"] .tl-gauge.tl-in .tl-gauge-bar::before { animation: hud-caret calc(var(--filled) * 28ms + 280ms) cubic-bezier(.3,1.38,.5,1) .12s backwards; }
+.tl[data-look="hud"] .tl-gauge.is-alert.tl-in .tl-gauge-bar::after { animation: hud-fill calc(var(--filled) * 28ms) steps(14) .12s backwards; }
+@keyframes hud-seg { 0% { background-color: transparent; box-shadow: inset 0 0 0 var(--h) var(--line); } 3% { background-color: #fff; } }
+@keyframes hud-caret { from { left: 0; } }
+@keyframes hud-fill { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* ---- corner brackets around a group ---- */
+.tl[data-look="hud"] .tl-grid,
+.tl[data-look="hud"] .tl-note,
+.tl[data-look="hud"] .tl-prompt[data-kind="login"],
+.tl[data-look="hud"] .tl-line[data-role="granted"],
+.tl[data-look="hud"] .hud-lockon {
+  --g: linear-gradient(var(--k) 0 0);
+  background:
+    var(--g) 0 0 / var(--s) var(--w) no-repeat, var(--g) 0 0 / var(--w) var(--s) no-repeat,
+    var(--g) 100% 0 / var(--s) var(--w) no-repeat, var(--g) 100% 0 / var(--w) var(--s) no-repeat,
+    var(--g) 0 100% / var(--s) var(--w) no-repeat, var(--g) 0 100% / var(--w) var(--s) no-repeat,
+    var(--g) 100% 100% / var(--s) var(--w) no-repeat, var(--g) 100% 100% / var(--w) var(--s) no-repeat;
+}
+@keyframes hud-corners {
+  from { background-size: 0 var(--w), var(--w) 0, 0 var(--w), var(--w) 0, 0 var(--w), var(--w) 0, 0 var(--w), var(--w) 0; }
+}
+/* app names: a bracketed list, each with a small marker */
+.tl[data-look="hud"] .tl-grid { margin-block: .4em; padding: .4em .9em; }
+.tl[data-look="hud"] .tl-app { padding-block: .27em; }
+.tl[data-look="hud"] .tl-app::before {
+  content: ""; display: inline-block; width: .34em; height: .34em; margin-right: .9ch; vertical-align: .14em;
+  border: var(--h) solid; transform: rotate(45deg); opacity: .85;
+}
+.tl[data-look="hud"] .tl-grid.tl-in { animation: hud-corners .36s cubic-bezier(.2,.8,.2,1) backwards; }
+.tl[data-look="hud"] .tl-grid.tl-in .tl-app { animation: hud-on .3s step-end backwards; animation-delay: calc(80ms + var(--col) * 90ms + var(--row) * 38ms); }
+/* a notification: a callout from the frame's edge, on a leader line */
+.tl[data-look="hud"] .tl-note {
+  --k: var(--accent);
+  width: fit-content; margin: .7em 1.35em .7em auto; padding: .42em 1em .48em; border: 0; background-color: rgba(255,178,62,.07);
+}
+.tl[data-look="hud"] .tl-note-app { display: block; margin: 0 0 .1em; font-size: .78em; line-height: 1.3; letter-spacing: .2em; }
+.tl[data-look="hud"] .tl-note::after {
+  content: ""; position: absolute; left: 100%; top: 50%; width: 2.26em; height: .34em; margin-top: -.17em;
+  background: linear-gradient(var(--accent) 0 0) 100% / .34em 100% no-repeat, linear-gradient(var(--accent) 0 0) 50% / 100% var(--h) no-repeat;
+}
+.tl[data-look="hud"] .tl-note.tl-in { animation: hud-callout .46s cubic-bezier(.16,.9,.3,1) backwards; }
+.tl[data-look="hud"] .tl-note.tl-in > span { animation: hud-on .34s step-end .3s backwards; }
+@keyframes hud-callout { from { transform: translateX(calc(100% + 3.8em)); } }
+.tl[data-look="hud"] .tl-spin { width: .72em; height: .72em; vertical-align: -.06em; border: .1em solid; border-color: var(--accent) transparent; animation-duration: .5s; }
+
+/* ---- prompt and chips ---- */
+.tl[data-look="hud"] .tl-prompt { animation: hud-on .3s step-end backwards; }
+.tl[data-look="hud"] .tl-cursor { height: 1.08em; background: var(--app); box-shadow: 0 0 .7em rgba(85,216,255,.8); }
+.tl[data-look="hud"] .tl-chips { min-height: 0; height: 9.5cqw; padding-top: 2cqw; gap: .5em; align-items: flex-start; }
+.tl[data-look="hud"] .tl-chip {
+  --c: .42em; --e: rgba(108,144,162,.6);
+  padding: .1em .66em; text-shadow: none; background-color: rgba(85,216,255,.05);
+  animation: hud-on .26s step-end backwards;
+}
+.tl[data-look="hud"] .tl-chip:nth-child(even) { animation-delay: 50ms; }
+.tl[data-look="hud"] .tl-chip:nth-child(n + 4) { animation-delay: .11s; }
+.tl[data-look="hud"] .tl-chip.is-app { --e: rgba(85,216,255,.55); color: var(--app); }
+.tl[data-look="hud"] .tl-chip.is-cmd { color: var(--fg); }
+.tl[data-look="hud"] .tl-chip.is-key { --e: rgba(255,178,62,.6); color: var(--accent); }
+
+/* ---- the lock page: an instrument, composed inside the frame ---- */
+.tl[data-look="hud"] .tl-line:is([data-role="lock-title"], [data-role="lock-date"], [data-role="lock-info"]) {
+  position: absolute; left: 7cqw; right: 2.6cqw; width: auto; max-width: none; text-align: center; white-space: nowrap;
+}
+.tl[data-look="hud"] .tl-line[data-role="lock-title"] {
+  top: 61cqw; display: flex; justify-content: center; align-items: center; gap: 1.1em; font-size: .86em; line-height: 1.5; letter-spacing: .32em;
+}
+.tl[data-look="hud"] .tl-line[data-role="lock-title"]::before,
+.tl[data-look="hud"] .tl-line[data-role="lock-title"]::after {
+  content: ""; flex: 0 0 5.2em; height: .34em;
+  background: linear-gradient(var(--dim) 0 0) 0 / .34em 100% no-repeat, linear-gradient(var(--line) 0 0) 50% / 100% var(--h) no-repeat;
+}
+.tl[data-look="hud"] .tl-line[data-role="lock-title"]::after { transform: scaleX(-1); }
+.tl[data-look="hud"] .tl-line[data-role="lock-date"] {
+  top: 116.4cqw; color: var(--accent); font-size: 1.02em; line-height: 1.5; letter-spacing: .36em; text-indent: .36em;
+}
+.tl[data-look="hud"] .tl-line[data-role="lock-info"] { top: 141.6cqw; font-size: .94em; }
+.tl[data-look="hud"] .tl-line.tl-clock {
+  position: absolute; left: 52.2cqw; top: 104cqw; width: 66cqw; height: 66cqw; margin: -33cqw 0 0 -33cqw; padding: 0;
+  display: grid; place-items: center;
+}
+.tl[data-look="hud"] .hud-ring {
+  position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
+  fill: none; stroke: var(--app); stroke-width: .42; filter: drop-shadow(0 0 .8cqw rgba(85,216,255,.45));
+}
+.tl[data-look="hud"] .hud-digits {
+  position: relative; top: -1.6cqw; display: flex;
+  font: 300 19cqw/1 var(--face); color: #eefbff; text-shadow: 0 0 2.6cqw rgba(85,216,255,.6);
+}
+.tl[data-look="hud"] .hud-digits b { width: .49em; font-weight: 300; text-align: center; }
+.tl[data-look="hud"] .hud-digits i { position: relative; top: -.05em; width: .24em; font-style: normal; text-align: center; color: var(--app); }
+.tl[data-look="hud"] .tl-prompt[data-kind="login"],
+.tl[data-look="hud"] .tl-line[data-role="granted"] {
+  position: absolute; left: 52.2cqw; top: 152cqw; width: 17.6em; max-width: none; padding: .62em 1.4em; transform: translateX(-50%);
+  white-space: pre; background-color: rgba(85,216,255,.04);
+}
+.tl[data-look="hud"] .tl-prompt[data-kind="login"] .tl-ps { color: var(--dim); }
+.tl[data-look="hud"] .tl-line[data-role="granted"] { --k: var(--ok); min-height: calc(var(--lh) * 1em + 1.24em); text-align: center; letter-spacing: .12em; }
+
+/* ---- what the transitions put in the top layer ---- */
+.tl[data-look="hud"] .hud-reticle { position: absolute; width: 0; height: 0; }
+.tl[data-look="hud"] .hud-reticle svg {
+  position: absolute; left: -53cqw; top: -53cqw; width: 106cqw; height: 106cqw; overflow: visible;
+  fill: none; stroke: var(--app); stroke-width: .6; filter: drop-shadow(0 0 1cqw rgba(85,216,255,.7));
+}
+.tl[data-look="hud"] .hud-reticle .hud-draw { stroke-dasharray: 1; }
+.tl[data-look="hud"] .hud-reticle .hud-dash { stroke-dasharray: .8 4.6; opacity: .75; }
+.tl[data-look="hud"] .hud-reticle .hud-fill { fill: var(--accent); stroke: none; }
+.tl[data-look="hud"] .hud-split { position: absolute; left: 7cqw; top: 13cqw; right: 2.6cqw; bottom: 19.2cqw; overflow: hidden; }
+.tl[data-look="hud"] .hud-half { position: absolute; left: 0; right: 0; overflow: hidden; border: 0 solid #e6f9ff; box-shadow: 0 0 2.4cqw rgba(85,216,255,.75); }
+.tl[data-look="hud"] .hud-lockon { --k: #e6f9ff; --s: 2.6cqw; --w: .52cqw; position: absolute; filter: drop-shadow(0 0 1cqw rgba(85,216,255,.8)); }
+.tl[data-look="hud"] .hud-tunnel { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tl[data-look="hud"] .hud-last {
+  position: absolute; left: 7cqw; right: 2.6cqw; top: 48%; height: max(1px, .4cqw);
+  background: #e6f9ff; box-shadow: 0 0 1.6cqw .3cqw rgba(85,216,255,.8);
+}

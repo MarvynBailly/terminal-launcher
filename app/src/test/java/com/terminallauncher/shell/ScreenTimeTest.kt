@@ -375,7 +375,7 @@ class ScreenCommandTest {
             ),
             s.lines.filterIsInstance<Gauge>(),
         )
-        assertEquals("average: 1h 10m on screen, 1 unlock a day", s.rows().last())
+        assertEquals("average: 1h 10m, 1 unlock a day", s.rows().last())
     }
 
     @Test fun onlyTheDaysThePhonesLogReaches() {
@@ -384,7 +384,7 @@ class ScreenCommandTest {
         // Nothing before Monday evening: Monday is shown, but it is no whole day to average.
         phone.logRead!!(log(session(2, 20, 90) + session(1, 9, 15) + today + inHand(5 * minute)))
         assertEquals(listOf("mon", "tue", "today"), s.lines.filterIsInstance<Gauge>().map { it.label })
-        assertEquals("average: 15m on screen, 1 unlock a day", s.rows().last())
+        assertEquals("average: 15m, 1 unlock a day", s.rows().last())
 
         s.clear()
         s.submit("screen")
@@ -515,7 +515,7 @@ class ScreenCommandTest {
             s.lines.filterIsInstance<Gauge>(),
         )
         val rows = s.rows()
-        assertEquals("average: 1h 10m on screen, 1 unlock a day", rows[rows.size - 2])
+        assertEquals("average: 1h 10m, 1 unlock a day", rows[rows.size - 2])
         assertEquals("budget 2h a day · 1h 20m left today", rows.last())
         assertEquals(Style.DIM, (s.lines.last() as TextLine).spans.single().style)
 

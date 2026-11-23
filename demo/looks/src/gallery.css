@@ -1,0 +1,106 @@
+/* Layout: the phone stays put on the left and plays the chosen look. Everything to choose with is on the right. */
+:root {
+  --bench: #e8e8e3;
+  --panel: #f5f5f1;
+  --ink: #1c1d1b;
+  --soft: #5b5e58;
+  --rule: #cdcec6;
+  --device: #17181a;
+  --device-edge: #303236;
+  --shadow: rgb(22 24 20 / 0.34);
+  --focus: #1c55ad;
+  /* the chosen look lends its accent to a few small things */
+  --look-accent: #f0b45e;
+  --look-bg: #000000;
+  --font-text: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bench: #101110; --panel: #181917; --ink: #e8e8e2; --soft: #9b9d95; --rule: #2b2d29;
+    --device: #1c1e20; --device-edge: #3a3d41; --shadow: rgb(0 0 0 / 0.66); --focus: #8fbaf0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bench: #101110; --panel: #181917; --ink: #e8e8e2; --soft: #9b9d95; --rule: #2b2d29;
+  --device: #1c1e20; --device-edge: #3a3d41; --shadow: rgb(0 0 0 / 0.66); --focus: #8fbaf0;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bench); color: var(--ink); font: 15px/1.55 var(--font-text); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.page {
+  max-width: 1160px; margin-inline: auto;
+  display: grid; gap: 28px;
+  padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.head { display: grid; gap: 6px; }
+.eyebrow { font: 500 12px/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--soft); }
+.head h1 { margin: 0; font: 600 clamp(26px, 4.2vw, 38px)/1.1 var(--font-text); letter-spacing: -0.01em; text-wrap: balance; }
+.head p { margin: 0; max-width: 62ch; color: var(--soft); }
+
+.show { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: clamp(24px, 5vw, 60px); align-items: start; }
+
+/* ---------- the phone and what drives it ---------- */
+.stage { position: sticky; top: max(16px, env(safe-area-inset-top, 0px)); display: grid; gap: 14px; justify-items: center; width: min(340px, max(230px, calc((100vh - 190px) * 0.4615))); }
+.device {
+  width: 100%; padding: 9px;
+  background: var(--device); border: 1px solid var(--device-edge); border-radius: 40px;
+  box-shadow: 0 30px 60px -30px var(--shadow), 0 0 110px -30px color-mix(in srgb, var(--look-accent) 55%, transparent);
+  transition: box-shadow 0.5s;
+}
+.device-screen { border-radius: 31px; overflow: hidden; background: #000000; }
+.scenes { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.scenes button, .step button, .copy {
+  padding: 6px 12px; border: 1px solid var(--rule); border-radius: 999px;
+  background: var(--panel); cursor: pointer; font: 500 13px/1.3 var(--font-mono);
+}
+.scenes button { padding-inline: 9px; font-size: 12.5px; }
+.scenes button:hover, .step button:hover, .copy:hover { border-color: var(--soft); }
+.scenes button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bench); }
+.motion-note { margin: 0; font-size: 13px; color: var(--soft); text-align: center; }
+
+/* ---------- about the chosen look ---------- */
+.side { display: grid; gap: 30px; min-width: 0; }
+.about { display: grid; gap: 14px; min-width: 0; }
+.about-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.count { font: 500 13px/1.3 var(--font-mono); color: var(--soft); font-variant-numeric: tabular-nums; }
+.about h2 { margin: 0; font: 600 clamp(24px, 3.4vw, 32px)/1.1 var(--font-text); letter-spacing: -0.01em; }
+.tagline { margin: 0; font: 400 15px/1.45 var(--font-mono); color: var(--soft); }
+.mood { margin: 0; max-width: 58ch; }
+.moves { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; max-width: 58ch; }
+.moves li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.moves li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--look-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 30%, transparent); transform: translateY(-1px); }
+.label { font: 500 12px/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--soft); }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.swatches i { width: 26px; height: 26px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent); }
+.swatches span { margin-left: 6px; font: 400 13px/1.3 var(--font-mono); color: var(--soft); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.step { display: flex; gap: 6px; }
+.copy-done { font: 400 13px/1.3 var(--font-mono); color: var(--soft); }
+
+/* ---------- every look, as a still ---------- */
+.picker { display: grid; gap: 12px; min-width: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 18px 14px; }
+.card { display: grid; gap: 8px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; min-width: 0; }
+.card-phone { display: block; border-radius: 13px; overflow: hidden; background: #000000; outline: 1px solid color-mix(in srgb, var(--ink) 24%, transparent); outline-offset: 0; transition: transform 0.18s, box-shadow 0.18s; }
+.card:hover .card-phone { transform: translateY(-3px); box-shadow: 0 14px 24px -16px var(--shadow); }
+.card[aria-pressed="true"] .card-phone { outline: 3px solid var(--ink); outline-offset: 3px; }
+.card-cap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 7px; align-items: baseline; }
+.card-no { font: 500 12px/1.3 var(--font-mono); color: var(--soft); font-variant-numeric: tabular-nums; }
+.card-name { font: 600 14px/1.3 var(--font-text); overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+  .show { grid-template-columns: minmax(0, 1fr); }
+  .stage { position: static; width: min(300px, 100%); justify-self: center; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 16px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .device, .card-phone { transition: none; }
+}

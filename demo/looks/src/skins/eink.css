@@ -1,0 +1,201 @@
+/*
+ * E-Ink: an e-paper reader. Ink on grey-green paper, and nothing in between but dither.
+ * The panel has 195 pixels across (--px is one of them); every pattern is drawn on that grid.
+ * Nothing eases: the page refreshes in hard steps (see eink.js).
+ */
+.tl[data-look="eink"] {
+  --bg: #dfe2d7; --fg: #16181a; --dim: #5c6059; --line: #a4a89c;
+  --accent: #16181a; --app: #16181a; --ok: #16181a; --err: #16181a;
+  --font: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --serif: "Abril Fatface", "Bodoni 72", Didot, Georgia, serif;
+  --weight: 400; --lh: 1.5; --pad: 4.2cqw;
+  --px: calc(100cqw / 195);
+  --hair: max(1px, 0.07em);
+  /* paper + ink, channel by channel: a `difference` layer of this colour swaps the two exactly */
+  --swap: #f5faf1;
+  --d8: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1z' fill='%2316181a'/%3E%3C/svg%3E");
+  --dot: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='2'%3E%3Cpath d='M1 1h1v1H1z' fill='%235c6059'/%3E%3C/svg%3E");
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .08 0 0 0 0 .09 0 0 0 0 .08 0 0 0 .34 -.13'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- the paper ---------- */
+.tl[data-look="eink"] .tl-bg {
+  background: var(--grain) 0 0 / 50cqw 50cqw;
+  box-shadow: inset 0 0 6cqw rgba(22, 24, 26, 0.07);
+}
+
+/* The text sits on a layer of its own, with nothing opaque behind it in that layer, so the browser
+   smooths it in greys and not with coloured sub-pixels: this panel has none. */
+.tl[data-look="eink"] .tl-screen { will-change: transform; }
+
+/* ---------- the running head ---------- */
+.tl[data-look="eink"] .tl-status {
+  position: relative; padding-bottom: 0.5em; margin-bottom: 1em;
+  border-bottom: var(--hair) solid var(--fg);
+}
+.tl[data-look="eink"] .tl-status::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; margin-top: var(--hair);
+  height: calc(4 * var(--px));
+  background: var(--eink-fade, none) 0 calc(-1 * var(--px)) / calc(8 * var(--px)) calc(6 * var(--px)) repeat-x;
+}
+.tl[data-look="eink"] .tl-status-l { font-style: italic; color: var(--fg); }
+
+/* ---------- roles: weight, underline and inversion, never hue ---------- */
+/* accent: bold italic, like a run-in heading. ok: bold. app: medium, underlined where it can be tapped. err: inverted. */
+.tl[data-look="eink"] .s-accent { font-weight: 600; font-style: italic; }
+.tl[data-look="eink"] .s-ok { font-weight: 600; }
+.tl[data-look="eink"] .is-tap .s-app,
+.tl[data-look="eink"] .tl-app,
+.tl[data-look="eink"] .tl-chip.is-app {
+  text-decoration: underline; text-decoration-thickness: var(--hair); text-underline-offset: 0.26em;
+  text-decoration-color: var(--dim);
+}
+.tl[data-look="eink"] .s-app { font-weight: 500; }
+.tl[data-look="eink"] .s-err { background: var(--fg); color: var(--bg); }
+.tl[data-look="eink"] [data-role="lock-title"],
+.tl[data-look="eink"] [data-role="wait"],
+.tl[data-look="eink"] .tl-launch-text { font-style: italic; }
+.tl[data-look="eink"] [data-role="lock-date"] { font-weight: 500; }
+/* The boot log is printed above the lock header. Room is kept for its seven lines from the start,
+   so the clock stays where it is while they arrive: only what changes is redrawn. */
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"] { margin-top: calc(var(--room, 0) * var(--lh) * 1em); }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(1) { --room: 7; }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(2) { --room: 6; }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(3) { --room: 5; }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(4) { --room: 4; }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(5) { --room: 3; }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(6) { --room: 2; }
+.tl[data-look="eink"] .tl-lines > [data-role="lock-title"]:nth-child(7) { --room: 1; }
+
+/* scrolled text does not stop at a hard edge under the head: it runs out in dither */
+.tl[data-look="eink"] .tl-lines {
+  padding-top: calc(6 * var(--px)); margin-top: calc(-6 * var(--px));
+  -webkit-mask: var(--eink-edge, linear-gradient(#000, #000)) 0 0 / calc(8 * var(--px)) calc(7 * var(--px)) repeat-x, linear-gradient(#000, #000) 0 calc(6 * var(--px)) / 100% 100% no-repeat;
+  mask: var(--eink-edge, linear-gradient(#000, #000)) 0 0 / calc(8 * var(--px)) calc(7 * var(--px)) repeat-x, linear-gradient(#000, #000) 0 calc(6 * var(--px)) / 100% 100% no-repeat;
+}
+
+/* a line does not print itself: it is there at once (the invert and the ghost are in eink.js) */
+.tl[data-look="eink"] .tl-line.tl-in { animation: none; }
+@keyframes eink-pop { from { opacity: 0; } }
+
+/* ---------- the lock clock: fat numerals, an ink outline, a dithered fill ---------- */
+.tl[data-look="eink"] .tl-clock { padding-block: 1.2em 1.5em; }
+.tl[data-look="eink"] .eink-plate {
+  display: block; position: relative;
+  width: calc(176 * var(--px)); height: calc(48 * var(--px));
+}
+.tl[data-look="eink"] .eink-plate::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%;
+  height: calc(6 * var(--px)); border-top: var(--px) solid var(--fg);
+  background: var(--eink-fade, none) 0 0 / calc(8 * var(--px)) calc(6 * var(--px)) repeat-x;
+}
+.tl[data-look="eink"] .eink-num {
+  display: block; height: 100%; white-space: nowrap;
+  font: 400 calc(58 * var(--px)) / calc(48 * var(--px)) var(--serif);
+  letter-spacing: 0.02em;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: calc(0.75 * var(--px)) var(--fg);
+  background: var(--eink-ramp, linear-gradient(var(--fg), var(--fg))) 0 0 / calc(8 * var(--px)) 100% repeat-x;
+  -webkit-background-clip: text; background-clip: text;
+}
+
+/* ---------- gauges: a dither ramp that darkens as it fills, then leader dots to the figure ---------- */
+.tl[data-look="eink"] .tl-gauge-label { color: var(--fg); }
+.tl[data-look="eink"] .tl-gauge-bar { gap: 0; width: calc(56 * var(--px)); height: calc(6 * var(--px)); }
+.tl[data-look="eink"] .tl-gauge .tl-gauge-bar i {
+  background: var(--dot) 0 100% / calc(4 * var(--px)) calc(2 * var(--px)) repeat-x;
+}
+.tl[data-look="eink"] .tl-gauge .tl-gauge-bar i.on {
+  background: var(--eink-bar, linear-gradient(var(--fg), var(--fg))) calc(var(--i) * -4 * var(--px)) 0 / calc(56 * var(--px)) calc(8 * var(--px)) no-repeat;
+  box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--fg);
+}
+.tl[data-look="eink"] .tl-gauge .tl-gauge-bar i.on + i:not(.on) { box-shadow: inset var(--px) 0 0 var(--fg); }
+.tl[data-look="eink"] .tl-gauge-note { margin-left: 1ch; color: var(--dim); }
+.tl[data-look="eink"] .tl-gauge.is-alert .tl-gauge-label { font-weight: 600; }
+.tl[data-look="eink"] .tl-gauge.is-alert .tl-gauge-bar i.on { background: var(--fg); }
+.tl[data-look="eink"] .tl-gauge.is-alert .tl-gauge-note { background: var(--fg); color: var(--bg); padding-right: 1ch; }
+/* a gauge fills in three hard steps */
+.tl[data-look="eink"] .tl-gauge.tl-in .tl-gauge-bar i.on { animation: eink-pop 1ms steps(1, end) backwards; animation-delay: 0ms; }
+.tl[data-look="eink"] .tl-gauge.tl-in .tl-gauge-bar i.on:nth-child(n+6) { animation-delay: 70ms; }
+.tl[data-look="eink"] .tl-gauge.tl-in .tl-gauge-bar i.on:nth-child(n+11) { animation-delay: 140ms; }
+.tl[data-look="eink"] .tl-gauge.tl-in .tl-gauge-note { animation: none; }
+
+/* ---------- the app list: three columns, each arriving at once ---------- */
+.tl[data-look="eink"] .tl-app { color: var(--fg); }
+.tl[data-look="eink"] .tl-grid.tl-in .tl-app { animation: eink-pop 1ms steps(1, end) backwards; animation-delay: calc(var(--col) * 80ms); }
+
+/* ---------- a notification: a slip with a dithered edge and an inverted tag ---------- */
+.tl[data-look="eink"] .tl-note {
+  position: relative; margin-block: 0.55em; padding: 0.3em 0 0.3em 1.05em;
+  border: 0 solid var(--fg); border-width: var(--hair) 0;
+}
+.tl[data-look="eink"] .tl-note::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(4 * var(--px));
+  background: var(--d8) 0 0 / calc(2 * var(--px)) calc(2 * var(--px));
+}
+.tl[data-look="eink"] .tl-note-app { padding: 0.1em 0.3em; margin-right: 1ch; background: var(--fg); color: var(--bg); font-weight: 500; }
+
+/* ---------- launching: a square that turns a quarter at a time ---------- */
+.tl[data-look="eink"] .tl-spin {
+  width: 0.62em; height: 0.62em; border: var(--hair) solid var(--fg); border-radius: 0;
+  background: linear-gradient(90deg, var(--fg) 50%, transparent 0);
+  animation: eink-turn 0.8s steps(4, end) infinite;
+}
+@keyframes eink-turn { to { transform: rotate(1turn); } }
+
+/* ---------- the prompt: e-paper does not blink ---------- */
+.tl[data-look="eink"] .tl-ps { font-weight: 600; }
+.tl[data-look="eink"] .tl-prompt[data-kind="login"] .tl-ps { font-weight: 400; }
+.tl[data-look="eink"] .tl-cursor { animation: none; }
+
+/* ---------- chips: soft keys with a one-pixel shadow ---------- */
+.tl[data-look="eink"] .tl-chips { gap: 0.7em; min-height: 2.8em; padding-top: 0.7em; }
+.tl[data-look="eink"] .tl-chip {
+  padding: 0.08em 0.7em; border: var(--hair) solid var(--fg); border-radius: 0;
+  color: var(--fg); box-shadow: var(--px) var(--px) 0 var(--fg); height: fit-content;
+}
+.tl[data-look="eink"] .tl-chip.is-key { background: var(--fg); color: var(--bg); }
+.tl[data-look="eink"] .tl-chip.is-cmd { font-weight: 500; }
+
+/* ---------- the layer over the page ----------
+   Not a stacking context of its own, so that each thing in it can blend with the page beneath. */
+.tl[data-look="eink"] .tl-fx { z-index: auto; }
+.tl[data-look="eink"] .tl-fx > * { position: absolute; }
+
+/* one frame of invert over what changed; the cells that turn the clock over; the negative of a whole page */
+.tl[data-look="eink"] .eink-inv,
+.tl[data-look="eink"] .eink-key,
+.tl[data-look="eink"] .eink-cells,
+.tl[data-look="eink"] .eink-neg { z-index: 4; mix-blend-mode: difference; }
+.tl[data-look="eink"] .eink-inv,
+.tl[data-look="eink"] .eink-neg { background: var(--swap); opacity: 0; }
+.tl[data-look="eink"] .eink-neg { inset: 0; z-index: 5; }
+.tl[data-look="eink"] .eink-grey { inset: 0; z-index: 5; background: #808080; mix-blend-mode: saturation; opacity: 0; }
+.tl[data-look="eink"] .eink-flat { inset: 0; z-index: 6; opacity: 0; }
+.tl[data-look="eink"] .eink-cells { display: grid; grid-template-columns: repeat(22, 1fr); grid-template-rows: repeat(6, 1fr); }
+.tl[data-look="eink"] .eink-cells i { background: var(--swap); box-shadow: 0 0 0 0.08cqw var(--swap); opacity: 0; }
+
+/* the picture the panel held a moment ago */
+.tl[data-look="eink"] .eink-ghost {
+  z-index: 3; overflow: hidden; opacity: 0;
+  font: var(--weight) 3.6cqw/var(--lh) var(--font);
+  font-variant-ligatures: none; font-variant-numeric: tabular-nums;
+}
+.tl[data-look="eink"] .eink-ghost .tl-lines { height: 100%; margin: 0; }
+
+/* ---------- asleep: e-paper keeps its picture with the power off ---------- */
+.tl[data-look="eink"] .eink-sleep { inset: 0; z-index: 3; background: var(--bg); opacity: 0; }
+.tl[data-look="eink"] .eink-sleep canvas {
+  position: absolute; left: 0; top: 0; width: 100%; height: calc(422 * var(--px));
+  image-rendering: pixelated;
+}
+.tl[data-look="eink"] .eink-sleep::after { content: ""; position: absolute; inset: 0; background: var(--grain) 0 0 / 50cqw 50cqw; }
+.tl[data-look="eink"] .eink-sleep-clock {
+  position: absolute; left: var(--pad); bottom: 5.2cqh;
+  font: 400 23cqw/1 var(--serif); letter-spacing: 0.02em; color: var(--bg);
+}
+.tl[data-look="eink"][data-scene="off"] .eink-sleep { opacity: 1; animation: eink-settle 90ms steps(1, end) backwards; }
+/* waking: the sleeping picture is still there for the first frame of the refresh */
+.tl[data-look="eink"][data-scene="boot"] .eink-sleep { animation: eink-hold 125ms steps(1, end) backwards; }
+@keyframes eink-settle { from { opacity: 0.4; } }
+@keyframes eink-hold { from { opacity: 1; } }

@@ -1,0 +1,296 @@
+/*
+ * Brutal: Swiss poster meets brutalist web. Paper, black and one red. Flat colour only: nothing is
+ * shaded, lit or rounded. Type and rules do the work, and everything that moves snaps.
+ *
+ * The sheet is 42 characters wide between two margins, in three columns of 14. The column
+ * lines are drawn behind the page and show wherever nothing is printed; the app table and the
+ * gauges are set to them, and the lock clock and date fill the whole measure.
+ */
+.tl[data-look="brutal"] {
+  --paper: #f5f4ef; --ink: #000000; --sig: #e8230f;
+  --bg: var(--paper); --fg: var(--ink); --dim: var(--ink); --line: var(--ink);
+  --accent: var(--sig); --app: var(--ink); --ok: var(--ink); --err: var(--sig);
+  --font: "Space Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --display: "Anton", "Archivo Black", Impact, "Arial Narrow", sans-serif;
+  --weight: 700; --lh: 1.5; --pad: 4.9cqw;
+  --rule: 0.36em;                       /* a thick rule */
+  --hair: max(1px, 0.07em);             /* a hairline */
+  --hairc: var(--ink);
+  --snap: cubic-bezier(.85, 0, .1, 1);  /* out of nowhere, dead stop */
+  --slam: cubic-bezier(.5, 0, .9, .45); /* gathers speed and hits */
+}
+/* On a phone drawn very small a hairline cannot get thinner than a pixel, so it gets lighter instead. */
+@container (max-width: 260px) {
+  .tl[data-look="brutal"] > * { --hairc: color-mix(in srgb, var(--ink) 45%, var(--paper)); }
+}
+.tl[data-look="brutal"][data-scene="off"] { background: #000; }
+.tl[data-look="brutal"][data-scene="off"] .tl-bg { visibility: hidden; }
+
+/* the column lines: the outer pair on the margins, the inner pair at 14 and 28 characters */
+.tl[data-look="brutal"] .tl-bg::before,
+.tl[data-look="brutal"] .tl-bg::after {
+  content: ""; position: absolute; top: 0; bottom: 0; font: 700 3.5cqw/1 var(--font);
+  border-inline: var(--hair) solid var(--hairc);
+}
+.tl[data-look="brutal"] .tl-bg::before { left: calc(var(--pad) - var(--hair)); width: calc(42ch + 2 * var(--hair)); }
+.tl[data-look="brutal"] .tl-bg::after { left: calc(var(--pad) + 14ch); width: calc(14ch + var(--hair)); }
+
+/* ---------------- the sheet: a black head band, full-bleed rows, a ruled foot ---------------- */
+
+.tl[data-look="brutal"] .tl-screen { padding-block: 0; font-size: 3.5cqw; }
+.tl[data-look="brutal"] .tl-status {
+  margin-inline: calc(-1 * var(--pad)); padding: 6.6cqw var(--pad) 0.6em;
+  background: var(--ink); color: var(--paper);
+  font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.tl[data-look="brutal"] .tl-body { margin-inline: calc(-1 * var(--pad)); }
+.tl[data-look="brutal"] .tl-lines { background: var(--paper); }
+.tl[data-look="brutal"] .tl-lines::before { content: ""; display: block; flex: none; height: 0.75em; background: var(--paper); }
+.tl[data-look="brutal"] .tl-line { position: relative; padding-inline: var(--pad); background-color: var(--paper); }
+
+.tl[data-look="brutal"] .s-dim { font-weight: 400; }
+.tl[data-look="brutal"] .s-ok { margin-inline: -0.4ch; padding-inline: 0.4ch; background: var(--ink); color: var(--paper); }
+.tl[data-look="brutal"] .s-accent { color: var(--ink); letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* an empty line is a thick rule, on the same 1.5em beat */
+.tl[data-look="brutal"] .tl-line.is-blank { padding: 0; }
+.tl[data-look="brutal"] .tl-line.is-blank::after { content: ""; position: absolute; inset: 0.57em 0; background: var(--ink); }
+
+/* what was typed: an inverted block */
+.tl[data-look="brutal"] .tl-echo {
+  padding-block: 0.25em; border-block: 0 solid var(--paper); border-width: 0.75em 0 0.45em;
+  background: var(--ink) padding-box; color: var(--paper);
+}
+.tl[data-look="brutal"] :is(.is-blank, .tl-grid, .tl-note) + .tl-echo { border-top-width: 0; }
+.tl[data-look="brutal"] .tl-echo .tl-ps { color: var(--paper); }
+
+/* tappable rows: ruled off, the live part underlined, a wedge at the end of the row */
+.tl[data-look="brutal"] .tl-line.is-tap { padding-block: 0.42em; border-top: var(--hair) solid var(--hairc); }
+.tl[data-look="brutal"] .tl-line.is-blank + .is-tap { border-top: 0; padding-top: 0.1em; }
+.tl[data-look="brutal"] .tl-line.is-tap + .tl-line:not(.is-tap) { border-top: var(--hair) solid var(--hairc); padding-top: 0.35em; }
+.tl[data-look="brutal"] .is-tap .s-app { text-decoration: underline; text-decoration-thickness: 0.12em; text-underline-offset: 0.22em; }
+.tl[data-look="brutal"] .tl-line.is-tap::before {
+  content: ""; position: absolute; right: var(--pad); bottom: 0.82em; width: 0.6em; height: 0.72em;
+  background: var(--ink); clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* ---------------- gauges: a slab on a ticked hairline, ending on the second column line ---------------- */
+
+.tl[data-look="brutal"] .tl-gauge { min-height: 2em; }
+.tl[data-look="brutal"] .tl-gauge-label { color: var(--ink); }
+.tl[data-look="brutal"] .tl-gauge-bar {
+  position: relative; width: calc(22ch + var(--hair)); height: 1.25em; gap: 0; align-items: end;
+  border-bottom: var(--hair) solid var(--hairc); border-right: var(--hair) solid var(--hairc);
+}
+.tl[data-look="brutal"] .tl-gauge-bar i,
+.tl[data-look="brutal"] .tl-gauge-bar i.on,
+.tl[data-look="brutal"] .tl-gauge.is-alert .tl-gauge-bar i.on { height: 0.3em; background: none; border-left: var(--hair) solid var(--hairc); }
+.tl[data-look="brutal"] .tl-gauge-bar i:nth-child(even) { border-left-color: transparent; }
+.tl[data-look="brutal"] .tl-gauge-bar::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--pct) * 1%);
+  background: var(--ink); transform-origin: 0 50%;
+}
+.tl[data-look="brutal"] .tl-gauge.is-alert .tl-gauge-bar::before { background: var(--sig); }
+.tl[data-look="brutal"] .tl-gauge-note { margin-left: calc(1ch - var(--hair)); color: var(--ink); font-weight: 400; }
+.tl[data-look="brutal"] .tl-gauge.is-alert .tl-gauge-note { color: var(--sig); font-weight: 700; }
+
+/* ---------------- app names: a ruled table on the three columns ---------------- */
+
+.tl[data-look="brutal"] .tl-grid {
+  grid-template-columns: calc(var(--pad) + 14ch) 14ch 1fr;
+  padding: 0 0 0.75em;
+}
+.tl[data-look="brutal"] .tl-echo + .tl-grid { margin-top: -0.45em; }
+/* --edge is 0 in the first column and 1 in the others, which get a rule on their left */
+.tl[data-look="brutal"] .tl-app {
+  --edge: min(var(--col), 1);
+  margin-bottom: calc(-1 * var(--hair)); padding: 0.3em 0;
+  padding-left: calc(var(--pad) + var(--edge) * (1ch - var(--hair) - var(--pad)));
+  border: 0 solid var(--hairc); border-width: var(--hair) 0 var(--hair) calc(var(--edge) * var(--hair));
+}
+
+/* ---------------- a notification: a slab of the signal colour ---------------- */
+
+.tl[data-look="brutal"] .tl-note {
+  margin: 0; padding: 0.5em var(--pad) 0.7em; border: 0 solid var(--paper); border-width: 0.75em 0;
+  background: var(--sig) padding-box; color: var(--paper);
+}
+.tl[data-look="brutal"] .tl-note-app {
+  display: block; margin: 0 0 0.4em; padding-bottom: 0.35em; border-bottom: var(--hair) solid var(--paper);
+  color: var(--paper); font-size: 0.86em; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.tl[data-look="brutal"] .tl-note-app::after { content: ""; float: right; width: 0.75em; height: 0.75em; margin-top: 0.35em; background: var(--paper); }
+.tl[data-look="brutal"] .tl-note-text { display: block; }
+
+/* ---------------- launching ---------------- */
+
+.tl[data-look="brutal"] .tl-launch { padding-block: 0.25em; }
+.tl[data-look="brutal"] .tl-launch-text { color: inherit; }
+.tl[data-look="brutal"][data-scene="launch"] .tl-launch,
+.tl[data-look="brutal"][data-scene="app"] .tl-launch { background-color: var(--ink); color: var(--paper); }
+.tl[data-look="brutal"] .tl-spin {
+  width: 0.8em; height: 0.8em; margin-left: 1ch; border: 0; border-radius: 0; vertical-align: -0.08em;
+  background: currentColor; animation: brutal-spin 0.44s steps(1) infinite;
+}
+@keyframes brutal-spin {
+  0% { clip-path: inset(0 50% 50% 0); }
+  25% { clip-path: inset(0 0 50% 50%); }
+  50% { clip-path: inset(50% 0 0 50%); }
+  75% { clip-path: inset(50% 50% 0 0); }
+}
+.tl[data-look="brutal"] [data-role="wait"]::after {
+  content: ""; display: inline-block; width: 3ch; height: 0.62em; margin-left: 1ch; background: var(--ink);
+  animation: brutal-wait 0.45s steps(1) infinite;
+}
+@keyframes brutal-wait {
+  0% { clip-path: inset(0 66.6% 0 0); }
+  33% { clip-path: inset(0 33.3% 0 0); }
+  66% { clip-path: inset(0 0 0 0); }
+}
+
+/* ---------------- the prompt and the chips ---------------- */
+
+/* the prompt sits in the box its echo will fill, so a command turns black where it stands */
+.tl[data-look="brutal"] .tl-prompt { padding: 1em var(--pad) 0.7em; background: var(--paper); }
+.tl[data-look="brutal"] .tl-lines:has(> :is(.is-blank, .tl-grid, .tl-note):last-child) + .tl-prompt[data-kind="shell"] { padding-top: 0.25em; }
+.tl[data-look="brutal"] .tl-ps { color: var(--ink); }
+.tl[data-look="brutal"] .tl-cursor { width: 1ch; height: 1.3em; background: var(--sig); }
+
+.tl[data-look="brutal"] .tl-chips {
+  min-height: calc(3.3em + 3.5cqw); margin-inline: calc(-1 * var(--pad)); padding: 0.7em var(--pad) 3.5cqw; gap: 0;
+  border-top: var(--rule) solid var(--ink); background: var(--paper);
+}
+.tl[data-look="brutal"] .tl-chip {
+  margin-right: calc(-1 * 0.14em); padding: 0.18em 0.8em;
+  border: 0.14em solid var(--ink); border-radius: 0; color: var(--ink);
+}
+.tl[data-look="brutal"] .tl-chip.is-cmd { background: var(--ink); color: var(--paper); }
+.tl[data-look="brutal"] .tl-chip.is-cmd + .is-cmd { border-left-color: var(--paper); }
+
+/* ---------------- the lock page: a poster ---------------- */
+
+.tl[data-look="brutal"]:is([data-scene="boot"], [data-scene="lock"], [data-scene="granted"]) .tl-chips { display: none; }
+.tl[data-look="brutal"]:is([data-scene="boot"], [data-scene="lock"], [data-scene="granted"]) .tl-lines { flex: 1 1 auto; display: flex; flex-direction: column; background: none; }
+.tl[data-look="brutal"]:is([data-scene="boot"], [data-scene="lock"], [data-scene="granted"]) .tl-line { flex: none; }
+
+.tl[data-look="brutal"] [data-role="lock-title"] { letter-spacing: 0.14em; text-transform: uppercase; }
+.tl[data-look="brutal"] .tl-clock { padding-block: 0.75em 0; }
+.tl[data-look="brutal"] .brutal-clock {
+  display: flex; justify-content: space-between; overflow: hidden; padding-block: 0.01em;
+  font: 400 46.8cqw/0.89 var(--display); color: var(--ink); white-space: nowrap;
+}
+.tl[data-look="brutal"] .brutal-clock b { display: block; flex: none; font-weight: 400; }
+/* the date is set to the same measure as the clock: a justified stack */
+.tl[data-look="brutal"] [data-role="lock-date"] {
+  min-height: 0; font: 400 20.2cqw/0.89 var(--display); white-space: normal;
+  text-align: justify; text-align-last: justify; text-transform: uppercase;
+}
+.tl[data-look="brutal"] .tl-clock::after,
+.tl[data-look="brutal"] [data-role="lock-date"]::after {
+  content: ""; display: block; height: 1.26cqw; margin: 3.2cqw calc(-1 * var(--pad)); background: var(--ink);
+}
+.tl[data-look="brutal"] [data-role="lock-date"]::after { margin-bottom: 2.2cqw; }
+.tl[data-look="brutal"] [data-role="lock-info"] { padding-bottom: 0.75em; }
+
+/* the password field: the one loud thing on the page */
+.tl[data-look="brutal"] .tl-prompt[data-kind="login"] { padding-block: 1.7em 2.3em; background: var(--sig); color: var(--paper); }
+.tl[data-look="brutal"] .tl-prompt[data-kind="login"] .tl-ps { color: var(--paper); }
+.tl[data-look="brutal"] .tl-prompt[data-kind="login"] .tl-cursor { background: var(--paper); }
+.tl[data-look="brutal"] .tl-prompt[data-kind="login"] .tl-input {
+  color: transparent;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Crect y='1.2' width='7.6' height='7.6' fill='%23f5f4ef'/%3E%3C/svg%3E") 0 50% / 1ch 1ch repeat-x;
+}
+/* it comes up from the foot of the sheet and stops dead */
+.tl[data-look="brutal"] .tl-prompt[data-kind="login"] { animation: brutal-rise 0.18s var(--slam) backwards; }
+@keyframes brutal-rise { from { transform: translateY(100%); } }
+/* and what takes its place when the password is right */
+.tl[data-look="brutal"] [data-role="granted"] {
+  margin-top: auto; padding-block: 1.7em 2.3em; background-color: var(--ink); color: var(--paper);
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.tl[data-look="brutal"] [data-role="granted"] .s-ok { background: none; }
+
+/* ---------------- how things arrive ---------------- */
+
+/* a line of text: a black bar runs out over it and pulls back, leaving the words */
+.tl[data-look="brutal"] .tl-line.tl-in { animation: none; }
+.tl[data-look="brutal"] .tl-text.tl-in > span,
+.tl[data-look="brutal"] .tl-text.tl-in::before { animation: brutal-ink 0.3s linear backwards; }
+.tl[data-look="brutal"] .tl-text.tl-in:not(.is-blank)::after {
+  content: ""; position: absolute; left: var(--pad); top: 0.14em; bottom: 0.14em; width: calc(var(--w, 42) * 1ch);
+  background: var(--ink); clip-path: inset(0 0 0 100%);
+  animation: brutal-wipe 0.3s linear backwards;
+}
+@keyframes brutal-ink { from, 46% { visibility: hidden; } }
+@keyframes brutal-wipe {
+  0% { clip-path: inset(0 100% 0 0); animation-timing-function: cubic-bezier(.7, 0, .2, 1); }
+  46% { clip-path: inset(0 0 0 0); animation-timing-function: cubic-bezier(.7, 0, .2, 1); }
+  100% { clip-path: inset(0 0 0 100%); }
+}
+.tl[data-look="brutal"] .tl-line.is-blank.tl-in::after { animation: brutal-rule 0.22s var(--snap) backwards; }
+@keyframes brutal-rule { from { clip-path: inset(0 100% 0 0); } }
+
+/* a gauge: the slab slams out past its length and is pulled back */
+.tl[data-look="brutal"] .tl-gauge.tl-in .tl-gauge-bar i.on { animation: none; }
+.tl[data-look="brutal"] .tl-gauge.tl-in .tl-gauge-bar::before { animation: brutal-slam 0.36s linear backwards; }
+.tl[data-look="brutal"] .tl-gauge.tl-in .tl-gauge-note { animation: brutal-late 0.36s linear backwards; }
+@keyframes brutal-slam {
+  0% { transform: scaleX(0); animation-timing-function: cubic-bezier(.5, 0, .9, .45); }
+  52% { transform: scaleX(1.09); animation-timing-function: steps(1, end); }
+  78% { transform: scaleX(1.09); animation-timing-function: cubic-bezier(.85, 0, .1, 1); }
+  100% { transform: scaleX(1); }
+}
+@keyframes brutal-late { from, 52% { visibility: hidden; } }
+
+/* the app table: each cell stamps in as a black block, then shows its name */
+.tl[data-look="brutal"] .tl-grid.tl-in .tl-app {
+  animation: brutal-cell 0.2s linear backwards;
+  animation-delay: calc(var(--row) * 42ms + var(--col) * 84ms);
+}
+@keyframes brutal-cell {
+  0% { background-color: var(--paper); color: transparent; border-color: transparent; }
+  1%, 55% { background-color: var(--ink); color: var(--ink); border-color: var(--ink); }
+  56% { background-color: var(--paper); color: var(--ink); }
+}
+
+/* chips stamp in the same way, one after the other */
+.tl[data-look="brutal"] .tl-chip { animation: brutal-chip 0.1s linear backwards; animation-delay: 0.1s; }
+.tl[data-look="brutal"] .tl-chip:nth-child(1) { animation-delay: 0s; }
+.tl[data-look="brutal"] .tl-chip:nth-child(2) { animation-delay: 0.025s; }
+.tl[data-look="brutal"] .tl-chip:nth-child(3) { animation-delay: 0.05s; }
+.tl[data-look="brutal"] .tl-chip:nth-child(4) { animation-delay: 0.075s; }
+@keyframes brutal-chip {
+  0% { background-color: var(--paper); color: transparent; border-color: transparent; }
+  1% { background-color: var(--ink); color: var(--ink); border-color: var(--ink); animation-timing-function: steps(1, end); }
+}
+
+/* the notification: thrown in from the right, stops dead, flashes black twice */
+.tl[data-look="brutal"] .tl-note.tl-in { animation: brutal-throw 0.2s var(--slam) backwards, brutal-flash 0.3s linear 0.2s; }
+@keyframes brutal-throw { from { transform: translateX(100%); } }
+@keyframes brutal-flash {
+  0%, 24% { background-color: var(--ink); }
+  25%, 49% { background-color: var(--sig); }
+  50%, 74% { background-color: var(--ink); }
+  75% { background-color: var(--sig); }
+}
+
+/* ---------------- the top layer ---------------- */
+
+/* the bar of red that crosses the screen on unlock. It runs by itself once started and rests off the sheet. */
+.tl[data-look="brutal"] .brutal-sweep { position: absolute; inset: 0; z-index: 5; background: var(--sig); transform: translateX(-101%); }
+.tl[data-look="brutal"] .brutal-sweep.is-on { transform: translateX(101%); animation: brutal-sweep 0.6s linear backwards; }
+@keyframes brutal-sweep {
+  0% { transform: translateX(-101%); animation-timing-function: cubic-bezier(.7, 0, .15, 1); }
+  30% { transform: none; animation-timing-function: steps(1, end); }
+  42% { transform: none; animation-timing-function: cubic-bezier(.75, 0, .3, 1); }
+  100% { transform: translateX(101%); }
+}
+.tl[data-look="brutal"] .brutal-block { position: absolute; display: block; background: #000; }
+.tl[data-look="brutal"] .brutal-ghost {
+  position: absolute; display: block; margin: 0;
+  font: 400 46.8cqw/0.89 var(--display); color: var(--ink); white-space: nowrap;
+}
+.tl[data-look="brutal"] .brutal-sheet { position: absolute; inset: 0; background: #000; color: var(--paper); }
+.tl[data-look="brutal"] .brutal-sheet span {
+  position: absolute; font: 700 3.5cqw/1.5 var(--font); white-space: pre; transform-origin: 0 100%;
+}
